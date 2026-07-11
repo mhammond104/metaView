@@ -9,13 +9,17 @@ It is designed primarily around ComfyUI-style metadata, with an emphasis on unde
 ## Features
 
 - Filesystem tree and responsive thumbnail browser
+- Persistent thumbnail cache and lazy thumbnail loading
 - Search and filtering by filename, prompt, model, sampler, scheduler, and star rating
+- Full-size image preview with responsive splitter resizing
 - Summary, LoRA, prompt JSON, workflow JSON, and raw metadata views
-- Side-by-side comparison with linked zoom and pan with highlighted parameter and LoRA differences
+- Side-by-side comparison with linked zoom and pan
+- Highlighted parameter and LoRA differences
 - Similarity Search by checkpoint, LoRAs, seed, positive prompt, sampler, scheduler, and resolution
 - Prompt Library with titles, tags, notes, editing, clipboard copy, and links to originating images
-- Star ratings wuth rating filters, and rating-aware sorting
-- Experiment View for comparing images with identical positive prompts
+- Persistent 0–5 star ratings, rating filters, and rating-aware sorting
+- Experiment View for images in one directory sharing an identical positive prompt
+- Dark interface, persistent UI settings, live folder watching, and drag-and-drop support
 
 ## Screenshots
 
@@ -62,6 +66,39 @@ python scripts/build.py
 ```
 
 PyInstaller is not a cross-compiler. Windows, macOS, and Linux packages must each be built on their respective operating system. GitHub Actions handles this using separate hosted runners.
+
+## Repository layout
+
+```text
+metaView/
+├── .github/workflows/     # CI, native builds, and release publishing
+├── screenshots/          # README and release screenshots
+├── scripts/build.py       # Cross-platform PyInstaller entry point
+├── src/metaview/          # Application package and bundled assets
+├── tests/                 # Automated source and asset checks
+├── main.py                # Convenient development launcher
+├── pyproject.toml         # Package metadata
+├── requirements.txt       # Runtime dependencies
+└── requirements-dev.txt   # Test and packaging dependencies
+```
+
+The application currently remains mostly in one module to minimise regression risk before the first release. Future work can split metadata parsing, comparison, Experiment View, ratings, and prompt-library functionality into focused modules.
+
+## GitHub Actions
+
+- **CI** runs source compilation and tests on Windows, macOS, and Linux with Python 3.11 and 3.13.
+- **Build applications** runs manually or whenever a tag matching `v*` is pushed. It creates downloadable Windows, macOS, and Linux artifacts.
+- **Publish release** is run manually after the tagged build succeeds. It creates a GitHub Release and attaches all three platform archives.
+
+## Planned features
+
+- Combined model, LoRA, sampler, and scheduler statistics window
+- Collections
+- Generation timeline
+- Contact-sheet generation
+- Improved prompt difference visualisation
+- Duplicate and near-duplicate detection
+- More comprehensive automated tests
 
 ## Privacy and stored data
 
