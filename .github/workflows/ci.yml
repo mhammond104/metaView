@@ -25,6 +25,17 @@ jobs:
         python-version: ["3.11", "3.13"]
 
     steps:
+
+      - name: Install Qt runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+          libegl1 \
+          libgl1 \
+          libxkbcommon-x11-0 \
+          libxcb-cursor0
+          
       - name: Check out repository
         uses: actions/checkout@v4
 
