@@ -51,3 +51,23 @@ The Prompt Library persistence layer is isolated under
 Application widgets and dialogs should depend on `PromptRepository`, not on
 SQLite or SQL statements. A single repository instance will later be created by
 the application and passed to Prompt Library UI components.
+
+## Global image index
+
+The Prompt Library image index is deliberately separate from prompt-entry
+persistence:
+
+- `prompt_library/image_index.py` defines the repository contract, aggregate
+  value objects, and `ImageIndexService` used by the application.
+- `prompt_library/sqlite_image_index.py` is the SQLite adapter.
+- `MetadataWorker` emits the positive prompt together with modification time
+  and file size.
+- `MainWindow.model_loaded()` sends every completed metadata result to the
+  index service before checking the thumbnail generation. This means a scan
+  remains useful to the global index even if the user navigates away before it
+  completes.
+- Opening or refreshing a directory prunes index entries that no longer exist
+  in that directory.
+
+The index stores only metadata needed for exact prompt matching. It does not
+own thumbnails, ratings, Prompt Library entries, or image metadata parsing.

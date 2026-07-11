@@ -125,7 +125,7 @@ class ThumbnailWorker(QRunnable):
 
 
 class MetadataSignals(QObject):
-    loaded = Signal(str, str, str, str, str, int)
+    loaded = Signal(str, str, str, str, str, int, int, int)
 
 
 class MetadataWorker(QRunnable):
@@ -142,9 +142,16 @@ class MetadataWorker(QRunnable):
         sampler = summary["sampler"] or UNKNOWN_SAMPLER
         scheduler = summary["scheduler"] or UNKNOWN_SCHEDULER
         positive_prompt = summary["positive"]
+        try:
+            stat = self.path.stat()
+            modified_ns = stat.st_mtime_ns
+            file_size = stat.st_size
+        except OSError:
+            modified_ns = 0
+            file_size = 0
         self.signals.loaded.emit(
             str(self.path), model, sampler, scheduler,
-            positive_prompt, self.generation
+            positive_prompt, self.generation, modified_ns, file_size
         )
 
 

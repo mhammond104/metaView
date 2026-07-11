@@ -92,7 +92,17 @@ from .metadata import (
     model_display_name, thumbnail_cache_path,
 )
 from .widgets import ImageDragListWidget, MetadataPanel
+from .prompt_library import ImageIndexService, SQLiteImageIndexRepository
 from .workers import MetadataWorker, ThumbnailWorker
+
+def image_index_database_path() -> Path:
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation
+    )
+    directory = Path(base or (Path.home() / ".metaview"))
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "image_index.sqlite3"
+
 
 class MainWindow(QMainWindow):
     PREFETCH_ROWS = 2
@@ -121,6 +131,9 @@ class MainWindow(QMainWindow):
         self.similarity_reference: Path | None = None
         self.similarity_criteria: dict[str, bool] = {}
         self.prompt_library_database = PromptLibraryDatabase()
+        self.image_index = ImageIndexService(
+            SQLiteImageIndexRepository(image_index_database_path())
+        )
         self.ratings_database = ImageRatingsDatabase()
         self.active_rating_filter = "all"
 
@@ -751,6 +764,7 @@ class MainWindow(QMainWindow):
 
         try:
             image_paths = self.sorted_image_paths(directory)
+            self.image_index.prune_directory(directory, image_paths)
         except OSError as error:
             QMessageBox.critical(self, "Unable to open folder", str(error))
             return
@@ -809,7 +823,15 @@ class MainWindow(QMainWindow):
         scheduler: str,
         positive_prompt: str,
         generation: int,
+        modified_ns: int,
+        file_size: int,
     ) -> None:
+        self.image_index.index_metadata(
+            Path(path_string),
+            positive_prompt,
+            modified_ns,
+            file_size,
+        )
         if generation != self.thumbnail_generation:
             return
 
@@ -1367,6 +1389,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.save_settings()
+        self.image_index.close()
         super().closeEvent(event)
 
 

@@ -21,3 +21,12 @@ All notable changes to metaView will be documented here.
 - Persistent 0–5 star ratings with filtering and sorting.
 - Experiment View for identical-positive-prompt image groups.
 - Cross-platform source layout and GitHub Actions workflows.
+
+### v0.2 development
+
+- Added a persistent global image index behind an application service and
+  repository interface.
+- Indexed positive prompts, image paths, directories, modification times and
+  file sizes during normal metadata scans.
+- Added exact-prompt counts, matching paths, per-directory counts, stale-file
+  pruning and index statistics.
