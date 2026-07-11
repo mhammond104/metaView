@@ -1,12 +1,35 @@
-## Unreleased
-
-- Added the initial Prompt Library domain package with typed prompt and image-index models.
-
 # Changelog
 
 All notable changes to metaView will be documented here.
 
-## [0.1.0] - 2026-07-11
+## [0.2.0]
+
+### Added
+
+- Global prompt library
+- Prompt ratings, tags, and notes
+- Prompt search, filtering, and sorting
+- Persistent global image index
+- Exact-prompt image counts
+- Cross-directory prompt result browsing
+- Temporary prompt view with previous-view-state restoration
+- Temporary similarity search results view with previous-view-state restoration
+
+### Changed
+- Refactored application into focused, manageable modules
+- Replaced legacy Prompt Library backend
+- Improved thumbnail action-state handling
+- Consolidated temporary resutls views
+
+### Fixed
+- Fixed image-rating controls after thumbnail selection
+- Fixed 'Open Image' selection handling
+- Fixed Experiment View availability with multiple selections
+- Fixed metadata panel imports after refactoring
+
+
+
+## [0.1.0]
 
 ### Added
 
@@ -22,19 +45,3 @@ All notable changes to metaView will be documented here.
 - Experiment View for identical-positive-prompt image groups.
 - Cross-platform source layout and GitHub Actions workflows.
 
-### v0.2 development
-
-- Added a persistent global image index behind an application service and
-  repository interface.
-- Indexed positive prompts, image paths, directories, modification times and
-  file sizes during normal metadata scans.
-- Added exact-prompt counts, matching paths, per-directory counts, stale-file
-  pruning and index statistics.
-
-## Unreleased (v0.2.0 development)
-
-- Replaced the legacy Prompt Library UI with a repository-backed global library.
-- Added prompt star ratings, user-defined tags, notes, search and filtering.
-- Added exact-prompt image counts and per-directory counts.
-- Added global prompt-result browsing with restoration of the previous view.
-- Added one-time import of compatible v0.1.0 Prompt Library entries.
