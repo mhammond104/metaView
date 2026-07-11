@@ -30,3 +30,11 @@ All notable changes to metaView will be documented here.
   file sizes during normal metadata scans.
 - Added exact-prompt counts, matching paths, per-directory counts, stale-file
   pruning and index statistics.
+
+## Unreleased (v0.2.0 development)
+
+- Replaced the legacy Prompt Library UI with a repository-backed global library.
+- Added prompt star ratings, user-defined tags, notes, search and filtering.
+- Added exact-prompt image counts and per-directory counts.
+- Added global prompt-result browsing with restoration of the previous view.
+- Added one-time import of compatible v0.1.0 Prompt Library entries.

@@ -81,7 +81,7 @@ from PySide6.QtWidgets import (
 )
 
 from .constants import *
-from .metadata import display_json, extract_summary
+from .metadata import display_json, extract_loras, extract_summary, parse_json_value
 
 class ImageDragListWidget(QListWidget):
     """Thumbnail list that drags the original image file."""
@@ -291,8 +291,10 @@ class PromptBox(QWidget):
 
 
 class MetadataPanel(QWidget):
-    def __init__(self, workflow_exporter) -> None:
+    def __init__(self, workflow_exporter, add_prompt_callback=None) -> None:
         super().__init__()
+        self.add_prompt_callback = add_prompt_callback
+        self.current_path: Path | None = None
         self.fields: dict[str, CopyableValue] = {}
 
         parameters_contents = QWidget()
@@ -349,6 +351,10 @@ class MetadataPanel(QWidget):
         prompts_layout.setContentsMargins(4, 8, 8, 8)
         prompts_layout.setSpacing(8)
         prompts_layout.addWidget(self.positive_prompt, 1)
+        self.add_to_library_button = QPushButton("Add to Library")
+        self.add_to_library_button.setEnabled(False)
+        self.add_to_library_button.clicked.connect(self._add_to_library)
+        prompts_layout.addWidget(self.add_to_library_button)
         prompts_layout.addWidget(self.negative_prompt, 1)
 
         self.summary_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -409,7 +415,18 @@ class MetadataPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.tabs)
 
+    def _add_to_library(self) -> None:
+        if self.add_prompt_callback is None:
+            return
+        self.add_prompt_callback(
+            self.positive_prompt.editor.toPlainText(),
+            self.negative_prompt.editor.toPlainText(),
+            self.current_path,
+        )
+
     def clear(self) -> None:
+        self.current_path = None
+        self.add_to_library_button.setEnabled(False)
         for field in self.fields.values():
             field.clear()
         self.positive_prompt.clear()
@@ -423,6 +440,8 @@ class MetadataPanel(QWidget):
 
     def show_metadata(self, path: Path, metadata: dict[str, Any]) -> None:
         summary = extract_summary(metadata)
+        self.current_path = path
+        self.add_to_library_button.setEnabled(bool(summary["positive"].strip()))
         self.fields["filename"].setText(path.name)
         for key in ("model", "seed", "steps", "cfg", "sampler", "scheduler", "denoise"):
             self.fields[key].setText(summary[key])

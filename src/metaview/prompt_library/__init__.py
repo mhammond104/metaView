@@ -41,3 +41,19 @@ __all__ = [
     "normalize_prompt",
     "utc_now",
 ]
+from .ui import (
+    PromptEditorDialog,
+    PromptLibraryController,
+    PromptLibraryDialog,
+    StarRatingWidget,
+)
+
+__all__ += [
+    "PromptEditorDialog",
+    "PromptLibraryController",
+    "PromptLibraryDialog",
+    "StarRatingWidget",
+]
+from .legacy import import_legacy_prompt_library
+
+__all__ += ["import_legacy_prompt_library"]
