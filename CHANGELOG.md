@@ -2,7 +2,34 @@
 
 All notable changes to metaView will be documented here.
 
-## [0.1.0] - 2026-07-11
+## [0.2.0]
+
+### Added
+
+- Global prompt library
+- Prompt ratings, tags, and notes
+- Prompt search, filtering, and sorting
+- Persistent global image index
+- Exact-prompt image counts
+- Cross-directory prompt result browsing
+- Temporary prompt view with previous-view-state restoration
+- Temporary similarity search results view with previous-view-state restoration
+
+### Changed
+- Refactored application into focused, manageable modules
+- Replaced legacy Prompt Library backend
+- Improved thumbnail action-state handling
+- Consolidated temporary resutls views
+
+### Fixed
+- Fixed image-rating controls after thumbnail selection
+- Fixed 'Open Image' selection handling
+- Fixed Experiment View availability with multiple selections
+- Fixed metadata panel imports after refactoring
+
+
+
+## [0.1.0]
 
 ### Added
 
@@ -17,3 +44,4 @@ All notable changes to metaView will be documented here.
 - Persistent 0–5 star ratings with filtering and sorting.
 - Experiment View for identical-positive-prompt image groups.
 - Cross-platform source layout and GitHub Actions workflows.
+
