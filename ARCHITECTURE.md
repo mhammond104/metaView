@@ -36,3 +36,18 @@ for v0.2. `Prompt` and `IndexedImage` are immutable, typed dataclasses, while
 `normalize_prompt()` defines exact-prompt matching consistently for future
 storage, indexing and UI modules. This package deliberately has no Qt or SQLite
 dependency.
+
+## Prompt Library backend
+
+The Prompt Library persistence layer is isolated under
+`metaview.prompt_library`:
+
+- `models.py` defines immutable domain objects.
+- `normalization.py` defines exact-prompt key generation.
+- `repository.py` defines the persistence contract, search objects, summaries,
+  statistics and repository-specific exceptions.
+- `sqlite.py` implements that contract with a versioned SQLite schema.
+
+Application widgets and dialogs should depend on `PromptRepository`, not on
+SQLite or SQL statements. A single repository instance will later be created by
+the application and passed to Prompt Library UI components.

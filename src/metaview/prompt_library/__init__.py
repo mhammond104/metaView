@@ -1,10 +1,31 @@
-"""Prompt Library domain package.
-
-The package currently exposes the behaviour-independent domain model. Database,
-indexing and user-interface modules will build on this API during v0.2.
-"""
+"""Public Prompt Library domain and persistence API."""
 
 from .models import IndexedImage, Prompt, utc_now
 from .normalization import normalize_prompt
+from .repository import (
+    DuplicatePromptError,
+    PromptLibraryError,
+    PromptLibraryStatistics,
+    PromptNotFoundError,
+    PromptRepository,
+    PromptSearch,
+    PromptSort,
+    TagSummary,
+)
+from .sqlite import SQLitePromptRepository
 
-__all__ = ["IndexedImage", "Prompt", "normalize_prompt", "utc_now"]
+__all__ = [
+    "DuplicatePromptError",
+    "IndexedImage",
+    "Prompt",
+    "PromptLibraryError",
+    "PromptLibraryStatistics",
+    "PromptNotFoundError",
+    "PromptRepository",
+    "PromptSearch",
+    "PromptSort",
+    "SQLitePromptRepository",
+    "TagSummary",
+    "normalize_prompt",
+    "utc_now",
+]
