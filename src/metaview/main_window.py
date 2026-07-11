@@ -350,10 +350,6 @@ class MainWindow(QMainWindow):
         self.experiment_view_button.setEnabled(False)
         self.experiment_view_button.clicked.connect(self.open_experiment_view)
 
-        self.clear_similarity_button = QPushButton("Clear Similarity Search")
-        self.clear_similarity_button.setVisible(False)
-        self.clear_similarity_button.clicked.connect(self.clear_similarity_search)
-
         self.compare_button = QPushButton("Compare")
         self.compare_button.setEnabled(False)
         self.compare_button.clicked.connect(self.compare_selected_images)
@@ -381,7 +377,6 @@ class MainWindow(QMainWindow):
 
         action_layout = QHBoxLayout()
         action_layout.setContentsMargins(8, 4, 8, 8)
-        action_layout.addWidget(self.clear_similarity_button)
         action_layout.addStretch(1)
         action_layout.addWidget(self.rating_label)
         for button in self.rating_buttons:
@@ -811,7 +806,6 @@ class MainWindow(QMainWindow):
         self.similarity_matches = None
         self.similarity_reference = None
         self.similarity_criteria = {}
-        self.clear_similarity_button.setVisible(False)
         self.preview.clear()
         self.preview.setText("Select an image")
         self.cache_hits = 0
@@ -1208,9 +1202,13 @@ class MainWindow(QMainWindow):
         }
 
     def clear_prompt_view_state(self) -> None:
+        """Leave any temporary prompt or similarity-results view."""
         self.prompt_view_state = None
         self.prompt_view_paths = None
         self.prompt_view_title = ""
+        self.similarity_matches = None
+        self.similarity_reference = None
+        self.similarity_criteria = {}
         if hasattr(self, "prompt_view_bar"):
             self.prompt_view_bar.setVisible(False)
 
@@ -1225,6 +1223,9 @@ class MainWindow(QMainWindow):
             return
         if self.prompt_view_state is None:
             self.prompt_view_state = self.capture_browser_state()
+        self.similarity_matches = None
+        self.similarity_reference = None
+        self.similarity_criteria = {}
         self.prompt_view_paths = paths
         self.prompt_view_title = prompt.title
         self.prompt_view_label.setText(
@@ -1239,9 +1240,13 @@ class MainWindow(QMainWindow):
         self.load_directory(paths[0].parent, image_paths=paths)
 
     def return_from_prompt_view(self) -> None:
+        """Restore the browser state captured before a temporary results view."""
         state = self.prompt_view_state
         self.prompt_view_paths = None
         self.prompt_view_title = ""
+        self.similarity_matches = None
+        self.similarity_reference = None
+        self.similarity_criteria = {}
         self.prompt_view_bar.setVisible(False)
         self.prompt_view_state = None
         if not state:
@@ -1429,10 +1434,17 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+        if self.prompt_view_state is None:
+            self.prompt_view_state = self.capture_browser_state()
+        self.prompt_view_paths = None
+        self.prompt_view_title = ""
         self.similarity_matches = matching_paths
         self.similarity_reference = reference
         self.similarity_criteria = criteria
-        self.clear_similarity_button.setVisible(True)
+        self.prompt_view_label.setText(
+            f'Currently showing similarity search results for "{reference.name}"'
+        )
+        self.prompt_view_bar.setVisible(True)
         self.apply_filters()
         self.schedule_visible_thumbnail_load()
 
@@ -1455,15 +1467,6 @@ class MainWindow(QMainWindow):
             + ", ".join(selected_names)
         )
 
-    def clear_similarity_search(self) -> None:
-        self.similarity_matches = None
-        self.similarity_reference = None
-        self.similarity_criteria = {}
-        self.clear_similarity_button.setVisible(False)
-        self.apply_filters()
-        self.schedule_visible_thumbnail_load()
-        self.statusBar().showMessage("Similarity search cleared")
-
     def thumbnail_selection_changed(self) -> None:
         """Refresh selection-dependent actions for any thumbnail selection change."""
         self.update_compare_button()
@@ -1485,6 +1488,10 @@ class MainWindow(QMainWindow):
             return
         if self.current_image_path != Path(path_value):
             self.image_selected(current, None)
+
+        # Experiment View is defined around one unambiguous starting image.
+        # It must not remain enabled when a multi-selection is active.
+        self.experiment_view_button.setEnabled(len(selected) == 1)
 
     def update_compare_button(self) -> None:
         self.compare_button.setEnabled(

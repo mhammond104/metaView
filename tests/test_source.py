@@ -95,3 +95,37 @@ def test_metadata_panel_imports_all_metadata_helpers_it_uses() -> None:
     ).read_text(encoding="utf-8")
     assert "extract_loras" in source.split("class ImageDragListWidget", 1)[0]
     assert "parse_json_value" in source.split("class ImageDragListWidget", 1)[0]
+
+
+def test_experiment_view_requires_exactly_one_selected_image() -> None:
+    source = (Path(__file__).resolve().parents[1] / "src" / "metaview" / "main_window.py").read_text(encoding="utf-8")
+    assert "self.experiment_view_button.setEnabled(len(selected) == 1)" in source
+
+
+def test_similarity_search_uses_temporary_results_banner() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "metaview"
+        / "main_window.py"
+    ).read_text(encoding="utf-8")
+    assert 'QPushButton("Clear Similarity Search")' not in source
+    assert "def clear_similarity_search" not in source
+    assert 'Currently showing similarity search results for' in source
+    assert "self.prompt_view_state = self.capture_browser_state()" in source
+    assert "self.prompt_view_bar.setVisible(True)" in source
+
+
+def test_return_from_temporary_view_clears_similarity_state() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "metaview"
+        / "main_window.py"
+    ).read_text(encoding="utf-8")
+    method = source.split("def return_from_prompt_view", 1)[1].split(
+        "def add_prompt_to_library", 1
+    )[0]
+    assert "self.similarity_matches = None" in method
+    assert "self.similarity_reference = None" in method
+    assert "self.similarity_criteria = {}" in method
