@@ -71,3 +71,18 @@ persistence:
 
 The index stores only metadata needed for exact prompt matching. It does not
 own thumbnails, ratings, Prompt Library entries, or image metadata parsing.
+
+## Prompt Library UI (v0.2 development)
+
+The Prompt Library user interface lives in `metaview.prompt_library.ui` and
+works only with `Prompt`, `PromptRepository`, and `ImageIndexService` objects.
+It never executes SQL directly.
+
+`PromptLibraryController` is a small observable application service. It emits
+`changed` after add, update, or delete operations, allowing every open Prompt
+Library view to refresh without parent-widget refresh chains.
+
+The main thumbnail browser supports a temporary global prompt-results source.
+Before entering it, `MainWindow` captures directory, searches, metadata filters,
+rating filter, sort order, selection, current image, and scroll position. The
+"Return to previous view" action restores that state.

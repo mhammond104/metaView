@@ -83,7 +83,6 @@ from PySide6.QtWidgets import (
 from .constants import *
 from .dialogs import (
     ComparisonDialog, ExperimentDialog, ImageRatingsDatabase,
-    PromptEntryDialog, PromptLibraryDatabase, PromptLibraryDialog,
     SimilaritySearchDialog, image_resolution, lora_signature,
     normalised_prompt, rating_text,
 )
@@ -92,8 +91,35 @@ from .metadata import (
     model_display_name, thumbnail_cache_path,
 )
 from .widgets import ImageDragListWidget, MetadataPanel
-from .prompt_library import ImageIndexService, SQLiteImageIndexRepository
+from .prompt_library import (
+    ImageIndexService,
+    Prompt,
+    PromptEditorDialog,
+    PromptLibraryController,
+    PromptLibraryDialog,
+    SQLiteImageIndexRepository,
+    SQLitePromptRepository,
+    import_legacy_prompt_library,
+)
 from .workers import MetadataWorker, ThumbnailWorker
+
+def legacy_prompt_library_database_path() -> Path:
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation
+    )
+    directory = Path(base or (Path.home() / ".metaview"))
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "prompt_library.sqlite3"
+
+
+def prompt_library_database_path() -> Path:
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation
+    )
+    directory = Path(base or (Path.home() / ".metaview"))
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "prompt_library_v2.sqlite3"
+
 
 def image_index_database_path() -> Path:
     base = QStandardPaths.writableLocation(
@@ -130,10 +156,24 @@ class MainWindow(QMainWindow):
         self.similarity_matches: set[str] | None = None
         self.similarity_reference: Path | None = None
         self.similarity_criteria: dict[str, bool] = {}
-        self.prompt_library_database = PromptLibraryDatabase()
+        self.prompt_repository = SQLitePromptRepository(
+            prompt_library_database_path()
+        )
+        import_legacy_prompt_library(
+            legacy_prompt_library_database_path(),
+            self.prompt_repository,
+        )
         self.image_index = ImageIndexService(
             SQLiteImageIndexRepository(image_index_database_path())
         )
+        self.prompt_library = PromptLibraryController(
+            self.prompt_repository,
+            self.image_index,
+            self,
+        )
+        self.prompt_view_state: dict[str, Any] | None = None
+        self.prompt_view_paths: list[Path] | None = None
+        self.prompt_view_title = ""
         self.ratings_database = ImageRatingsDatabase()
         self.active_rating_filter = "all"
 
@@ -183,7 +223,7 @@ class MainWindow(QMainWindow):
         self.image_list.setWordWrap(True)
         self.image_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.image_list.currentItemChanged.connect(self.image_selected)
-        self.image_list.itemSelectionChanged.connect(self.update_compare_button)
+        self.image_list.itemSelectionChanged.connect(self.thumbnail_selection_changed)
         self.image_list.verticalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
         self.image_list.horizontalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
 
@@ -258,6 +298,17 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(QLabel("Rating:"))
         search_layout.addWidget(self.rating_filter_combo)
 
+        self.prompt_view_bar = QFrame()
+        self.prompt_view_bar.setFrameShape(QFrame.Shape.StyledPanel)
+        self.prompt_view_bar.setVisible(False)
+        prompt_view_layout = QHBoxLayout(self.prompt_view_bar)
+        prompt_view_layout.setContentsMargins(8, 5, 8, 5)
+        self.prompt_view_label = QLabel()
+        self.return_prompt_view_button = QPushButton("Return to previous view")
+        self.return_prompt_view_button.clicked.connect(self.return_from_prompt_view)
+        prompt_view_layout.addWidget(self.prompt_view_label, 1)
+        prompt_view_layout.addWidget(self.return_prompt_view_button)
+        panel_layout.addWidget(self.prompt_view_bar)
         panel_layout.addWidget(search_row)
         panel_layout.addWidget(self.make_filter_labeled_row("Model", self.model_filter_scroll))
         panel_layout.addWidget(self.make_filter_labeled_row("Sampler", self.sampler_filter_scroll))
@@ -269,7 +320,10 @@ class MainWindow(QMainWindow):
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumSize(400, 300)
         self.preview.setStyleSheet("QLabel { background: palette(base); border: 1px solid palette(mid); }")
-        self.metadata_panel = MetadataPanel(self.export_workflow_for_image)
+        self.metadata_panel = MetadataPanel(
+            self.export_workflow_for_image,
+            self.add_prompt_to_library,
+        )
 
     def create_layout(self) -> None:
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -295,17 +349,6 @@ class MainWindow(QMainWindow):
         self.experiment_view_button = QPushButton("Experiment View")
         self.experiment_view_button.setEnabled(False)
         self.experiment_view_button.clicked.connect(self.open_experiment_view)
-
-        self.save_prompt_button = QPushButton("Save Prompt")
-        self.save_prompt_button.setEnabled(False)
-        self.save_prompt_button.clicked.connect(self.save_current_prompt)
-
-        self.prompt_library_button = QPushButton("Prompt Library")
-        self.prompt_library_button.clicked.connect(self.open_prompt_library)
-
-        self.clear_similarity_button = QPushButton("Clear Similarity Search")
-        self.clear_similarity_button.setVisible(False)
-        self.clear_similarity_button.clicked.connect(self.clear_similarity_search)
 
         self.compare_button = QPushButton("Compare")
         self.compare_button.setEnabled(False)
@@ -334,9 +377,6 @@ class MainWindow(QMainWindow):
 
         action_layout = QHBoxLayout()
         action_layout.setContentsMargins(8, 4, 8, 8)
-        action_layout.addWidget(self.clear_similarity_button)
-        action_layout.addWidget(self.prompt_library_button)
-        action_layout.addWidget(self.save_prompt_button)
         action_layout.addStretch(1)
         action_layout.addWidget(self.rating_label)
         for button in self.rating_buttons:
@@ -368,22 +408,10 @@ class MainWindow(QMainWindow):
         refresh_action.setShortcut("F5")
         refresh_action.triggered.connect(self.refresh_directory)
         toolbar.addAction(refresh_action)
-        similar_action = QAction("Find similar", self)
-        similar_action.setShortcut("Ctrl+Shift+F")
-        similar_action.triggered.connect(self.find_similar_images)
-        toolbar.addAction(similar_action)
-        experiment_action = QAction("Experiment view", self)
-        experiment_action.setShortcut("Ctrl+E")
-        experiment_action.triggered.connect(self.open_experiment_view)
-        toolbar.addAction(experiment_action)
         library_action = QAction("Prompt library", self)
         library_action.setShortcut("Ctrl+L")
         library_action.triggered.connect(self.open_prompt_library)
         toolbar.addAction(library_action)
-        save_prompt_action = QAction("Save prompt", self)
-        save_prompt_action.setShortcut("Ctrl+Shift+S")
-        save_prompt_action.triggered.connect(self.save_current_prompt)
-        toolbar.addAction(save_prompt_action)
         for rating in range(6):
             rating_action = QAction(f"Set rating {rating}", self)
             rating_action.setShortcut(f"Ctrl+{rating}")
@@ -503,7 +531,11 @@ class MainWindow(QMainWindow):
 
     def sort_changed(self, _index: int) -> None:
         if self.current_directory is not None:
-            self.load_directory(self.current_directory, preserve_state=True)
+            self.load_directory(
+                self.current_directory,
+                preserve_state=True,
+                image_paths=self.prompt_view_paths,
+            )
 
     def watch_directory(self, directory: Path) -> None:
         watched = self.file_watcher.directories()
@@ -535,6 +567,7 @@ class MainWindow(QMainWindow):
         )
         if selected:
             directory = Path(selected)
+            self.clear_prompt_view_state()
             self.select_directory_in_tree(directory)
             self.load_directory(directory)
 
@@ -547,11 +580,16 @@ class MainWindow(QMainWindow):
     def directory_selected(self, index) -> None:
         path = Path(self.file_model.filePath(index))
         if path.is_dir():
+            self.clear_prompt_view_state()
             self.load_directory(path)
 
     def refresh_directory(self) -> None:
         if self.current_directory:
-            self.load_directory(self.current_directory, preserve_state=True)
+            self.load_directory(
+                self.current_directory,
+                preserve_state=True,
+                image_paths=self.prompt_view_paths,
+            )
 
     def create_filter_row(
         self,
@@ -692,7 +730,12 @@ class MainWindow(QMainWindow):
         self.apply_filters()
         self.schedule_visible_thumbnail_load()
 
-    def load_directory(self, directory: Path, preserve_state: bool = False) -> None:
+    def load_directory(
+        self,
+        directory: Path,
+        preserve_state: bool = False,
+        image_paths: list[Path] | None = None,
+    ) -> None:
         preserved_filename_search = (
             self.filename_search_box.text() if preserve_state else ""
         )
@@ -727,8 +770,16 @@ class MainWindow(QMainWindow):
         generation = self.thumbnail_generation
         self.lazy_load_timer.stop()
         self.current_directory = directory
-        self.watch_directory(directory)
-        self.folder_label.setText(str(directory))
+        if image_paths is None:
+            self.watch_directory(directory)
+            self.folder_label.setText(str(directory))
+        else:
+            watched = self.file_watcher.directories()
+            if watched:
+                self.file_watcher.removePaths(watched)
+            self.folder_label.setText(
+                f"Prompt Library — {self.prompt_view_title} ({len(image_paths)} images)"
+            )
         self.image_list.clear()
         self.thumbnail_items.clear()
         self.filename_search_box.blockSignals(True)
@@ -751,20 +802,25 @@ class MainWindow(QMainWindow):
         self.compare_button.setEnabled(False)
         self.find_similar_button.setEnabled(False)
         self.experiment_view_button.setEnabled(False)
-        self.save_prompt_button.setEnabled(False)
         self.update_rating_controls(0, enabled=False)
         self.similarity_matches = None
         self.similarity_reference = None
         self.similarity_criteria = {}
-        self.clear_similarity_button.setVisible(False)
         self.preview.clear()
         self.preview.setText("Select an image")
         self.cache_hits = 0
         self.generated_thumbnails = 0
 
         try:
-            image_paths = self.sorted_image_paths(directory)
-            self.image_index.prune_directory(directory, image_paths)
+            if image_paths is None:
+                image_paths = self.sorted_image_paths(directory)
+                self.image_index.prune_directory(directory, image_paths)
+            else:
+                image_paths = sorted(
+                    [path for path in image_paths if path.is_file()],
+                    key=self.sort_key_for_path,
+                    reverse=self.current_sort_mode() == "filename_desc",
+                )
         except OSError as error:
             QMessageBox.critical(self, "Unable to open folder", str(error))
             return
@@ -1062,8 +1118,6 @@ class MainWindow(QMainWindow):
         rating = self.ratings_database.get(path)
         current.setData(RATING_ROLE, rating)
         self.update_rating_controls(rating, enabled=True)
-        summary = extract_summary(metadata)
-        self.save_prompt_button.setEnabled(bool(summary["positive"] or summary["negative"]))
 
         message = (
             f"{path.name} — {rating_text(rating)} — ComfyUI metadata found"
@@ -1072,6 +1126,19 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(message)
 
+
+    def selected_image_path(self) -> Path | None:
+        """Return the current selected thumbnail path without relying on cached state."""
+        current = self.image_list.currentItem()
+        if current is None:
+            selected = self.image_list.selectedItems()
+            current = selected[-1] if selected else None
+        if current is None:
+            return None
+        path_value = current.data(PATH_ROLE)
+        if not isinstance(path_value, str):
+            return None
+        return Path(path_value)
 
     def update_rating_controls(self, rating: int, enabled: bool = True) -> None:
         value = max(0, min(5, int(rating)))
@@ -1082,9 +1149,15 @@ class MainWindow(QMainWindow):
         self.rating_label.setEnabled(enabled)
 
     def set_current_rating(self, rating: int) -> None:
-        path = self.current_image_path
+        path = self.selected_image_path()
         if path is None:
+            QMessageBox.information(
+                self,
+                "Select an image",
+                "Select a thumbnail before setting its rating.",
+            )
             return
+        self.current_image_path = path
         value = max(0, min(5, int(rating)))
         self.ratings_database.set(path, value)
         item = self.thumbnail_items.get(str(path))
@@ -1103,48 +1176,163 @@ class MainWindow(QMainWindow):
             self.apply_filters()
             self.schedule_visible_thumbnail_load()
 
-    def prompt_values_for_current_image(self) -> dict[str, str] | None:
-        if self.current_image_path is None:
-            return None
-        summary = extract_summary(self.current_metadata)
-        if not summary["positive"] and not summary["negative"]:
-            return None
-        loras = extract_loras(self.current_metadata)
+    def capture_browser_state(self) -> dict[str, Any]:
+        current_item = self.image_list.currentItem()
         return {
-            "title": self.current_image_path.stem,
-            "description": "",
-            "tags": "",
-            "positive_prompt": summary["positive"],
-            "negative_prompt": summary["negative"],
-            "source_image": str(self.current_image_path),
-            "model": summary["model"],
-            "loras_json": json.dumps(loras, ensure_ascii=False),
+            "directory": self.current_directory,
+            "filename_search": self.filename_search_box.text(),
+            "prompt_search": self.prompt_search_box.text(),
+            "model": self.active_model,
+            "sampler": self.active_sampler,
+            "scheduler": self.active_scheduler,
+            "rating_filter": self.active_rating_filter,
+            "sort_mode": self.current_sort_mode(),
+            "selected": [
+                str(item.data(PATH_ROLE))
+                for item in self.image_list.selectedItems()
+                if isinstance(item.data(PATH_ROLE), str)
+            ],
+            "current": (
+                str(current_item.data(PATH_ROLE))
+                if current_item is not None
+                and isinstance(current_item.data(PATH_ROLE), str)
+                else None
+            ),
+            "scroll": self.image_list.verticalScrollBar().value(),
         }
 
-    def save_current_prompt(self) -> None:
-        values = self.prompt_values_for_current_image()
-        if values is None:
-            QMessageBox.information(self, "No prompt found", "The selected image does not contain a readable positive or negative prompt.")
+    def clear_prompt_view_state(self) -> None:
+        """Leave any temporary prompt or similarity-results view."""
+        self.prompt_view_state = None
+        self.prompt_view_paths = None
+        self.prompt_view_title = ""
+        self.similarity_matches = None
+        self.similarity_reference = None
+        self.similarity_criteria = {}
+        if hasattr(self, "prompt_view_bar"):
+            self.prompt_view_bar.setVisible(False)
+
+    def enter_prompt_view(self, prompt: Prompt) -> None:
+        paths = self.image_index.matching_paths(prompt)
+        if not paths:
+            QMessageBox.information(
+                self,
+                "No matching images",
+                "No indexed images currently use this exact prompt.",
+            )
             return
-        dialog = PromptEntryDialog(values, self)
+        if self.prompt_view_state is None:
+            self.prompt_view_state = self.capture_browser_state()
+        self.similarity_matches = None
+        self.similarity_reference = None
+        self.similarity_criteria = {}
+        self.prompt_view_paths = paths
+        self.prompt_view_title = prompt.title
+        self.prompt_view_label.setText(
+            f'Currently viewing images relating to prompt "{prompt.title}"'
+        )
+        self.prompt_view_bar.setVisible(True)
+        self.filename_search_box.clear()
+        self.prompt_search_box.clear()
+        self.rating_filter_combo.setCurrentIndex(
+            self.rating_filter_combo.findData("all")
+        )
+        self.load_directory(paths[0].parent, image_paths=paths)
+
+    def return_from_prompt_view(self) -> None:
+        """Restore the browser state captured before a temporary results view."""
+        state = self.prompt_view_state
+        self.prompt_view_paths = None
+        self.prompt_view_title = ""
+        self.similarity_matches = None
+        self.similarity_reference = None
+        self.similarity_criteria = {}
+        self.prompt_view_bar.setVisible(False)
+        self.prompt_view_state = None
+        if not state:
+            return
+        directory = state.get("directory")
+        if not isinstance(directory, Path) or not directory.is_dir():
+            return
+        sort_index = self.sort_combo.findData(state.get("sort_mode"))
+        if sort_index >= 0:
+            self.sort_combo.blockSignals(True)
+            self.sort_combo.setCurrentIndex(sort_index)
+            self.sort_combo.blockSignals(False)
+        rating_index = self.rating_filter_combo.findData(
+            state.get("rating_filter", "all")
+        )
+        if rating_index >= 0:
+            self.rating_filter_combo.blockSignals(True)
+            self.rating_filter_combo.setCurrentIndex(rating_index)
+            self.rating_filter_combo.blockSignals(False)
+            self.active_rating_filter = str(
+                self.rating_filter_combo.currentData() or "all"
+            )
+        self.load_directory(directory)
+        self.filename_search_box.setText(str(state.get("filename_search", "")))
+        self.prompt_search_box.setText(str(state.get("prompt_search", "")))
+        self.pending_filter_restore = {
+            "model": str(state.get("model", "All")),
+            "sampler": str(state.get("sampler", "All")),
+            "scheduler": str(state.get("scheduler", "All")),
+        }
+        self.active_model = self.pending_filter_restore["model"]
+        self.active_sampler = self.pending_filter_restore["sampler"]
+        self.active_scheduler = self.pending_filter_restore["scheduler"]
+        selected = {str(path) for path in state.get("selected", [])}
+        for path_string in selected:
+            item = self.thumbnail_items.get(path_string)
+            if item is not None:
+                item.setSelected(True)
+        current_path = state.get("current")
+        if isinstance(current_path, str):
+            item = self.thumbnail_items.get(current_path)
+            if item is not None:
+                self.image_list.setCurrentItem(item)
+        QTimer.singleShot(
+            0,
+            lambda: self.image_list.verticalScrollBar().setValue(
+                int(state.get("scroll", 0))
+            ),
+        )
+
+    def add_prompt_to_library(
+        self,
+        positive_prompt: str,
+        negative_prompt: str,
+        source_image: Path | None,
+    ) -> None:
+        existing = self.prompt_repository.find_exact(positive_prompt)
+        if existing is not None:
+            answer = QMessageBox.question(
+                self,
+                "Prompt already in library",
+                f'This exact prompt is already saved as "{existing.title}". '
+                "Open it for editing?",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                PromptEditorDialog(
+                    self.prompt_library,
+                    prompt=existing,
+                    parent=self,
+                ).exec()
+            return
+        dialog = PromptEditorDialog(
+            self.prompt_library,
+            positive_prompt=positive_prompt,
+            negative_prompt=negative_prompt,
+            source_image=source_image,
+            parent=self,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.prompt_library_database.add(dialog.values())
             self.statusBar().showMessage("Prompt saved to library", 4000)
 
     def open_prompt_library(self) -> None:
-        dialog = PromptLibraryDialog(self.prompt_library_database, self.open_library_source_image, self)
+        self.image_index.remove_missing()
+        dialog = PromptLibraryDialog(self.prompt_library, self)
+        dialog.browse_requested.connect(self.enter_prompt_view)
         dialog.exec()
-
-    def open_library_source_image(self, path: Path) -> None:
-        # Prefer selecting it inside metaView when its folder is already loaded.
-        item = self.thumbnail_items.get(str(path))
-        if item is not None:
-            self.image_list.setCurrentItem(item)
-            self.image_list.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
-            return
-        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        if not opened:
-            QMessageBox.warning(self, "Unable to open image", "The operating system could not open the originating image.")
 
     def open_experiment_view(self) -> None:
         reference = self.current_image_path
@@ -1246,10 +1434,17 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+        if self.prompt_view_state is None:
+            self.prompt_view_state = self.capture_browser_state()
+        self.prompt_view_paths = None
+        self.prompt_view_title = ""
         self.similarity_matches = matching_paths
         self.similarity_reference = reference
         self.similarity_criteria = criteria
-        self.clear_similarity_button.setVisible(True)
+        self.prompt_view_label.setText(
+            f'Currently showing similarity search results for "{reference.name}"'
+        )
+        self.prompt_view_bar.setVisible(True)
         self.apply_filters()
         self.schedule_visible_thumbnail_load()
 
@@ -1272,14 +1467,31 @@ class MainWindow(QMainWindow):
             + ", ".join(selected_names)
         )
 
-    def clear_similarity_search(self) -> None:
-        self.similarity_matches = None
-        self.similarity_reference = None
-        self.similarity_criteria = {}
-        self.clear_similarity_button.setVisible(False)
-        self.apply_filters()
-        self.schedule_visible_thumbnail_load()
-        self.statusBar().showMessage("Similarity search cleared")
+    def thumbnail_selection_changed(self) -> None:
+        """Refresh selection-dependent actions for any thumbnail selection change."""
+        self.update_compare_button()
+        selected = self.image_list.selectedItems()
+        if not selected:
+            self.open_image_button.setEnabled(False)
+            self.find_similar_button.setEnabled(False)
+            self.experiment_view_button.setEnabled(False)
+            self.update_rating_controls(0, enabled=False)
+            return
+
+        current = self.image_list.currentItem()
+        if current is None or current not in selected:
+            current = selected[-1]
+            self.image_list.setCurrentItem(current)
+
+        path_value = current.data(PATH_ROLE)
+        if not isinstance(path_value, str):
+            return
+        if self.current_image_path != Path(path_value):
+            self.image_selected(current, None)
+
+        # Experiment View is defined around one unambiguous starting image.
+        # It must not remain enabled when a multi-selection is active.
+        self.experiment_view_button.setEnabled(len(selected) == 1)
 
     def update_compare_button(self) -> None:
         self.compare_button.setEnabled(
@@ -1308,16 +1520,23 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def open_selected_image(self) -> None:
-        if self.current_image_path is None:
+        path = self.selected_image_path()
+        if path is None:
+            QMessageBox.information(
+                self,
+                "Select an image",
+                "Select a thumbnail before opening an image.",
+            )
             return
-        opened = QDesktopServices.openUrl(
-            QUrl.fromLocalFile(str(self.current_image_path))
-        )
+        self.current_image_path = path
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
         if not opened:
             QMessageBox.warning(
                 self,
                 "Unable to open image",
-                "The operating system could not open the selected image.",
+                "The operating system could not open the selected image. "
+                "On Arch Linux, install an image viewer and set it as the "
+                "default application for this image type.",
             )
 
     def export_workflow_for_image(
@@ -1389,6 +1608,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.save_settings()
+        self.prompt_repository.close()
         self.image_index.close()
         super().closeEvent(event)
 
