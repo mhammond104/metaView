@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import struct
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -116,7 +117,32 @@ class ImageDragListWidget(QListWidget):
         if not icon.isNull():
             drag.setPixmap(icon.pixmap(self.iconSize()))
 
-        drag.exec(Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction, Qt.DropAction.CopyAction)
+
+
+def workflow_drag_mime_data(workflow_path: Path) -> QMimeData:
+    """Create a cross-platform file drag payload for an exported workflow."""
+    resolved_path = workflow_path.expanduser().resolve()
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(resolved_path))])
+    mime_data.setText(str(resolved_path))
+
+    if sys.platform == "win32":
+        # Qt translates URLs for many Windows drop targets, but Explorer and
+        # Chromium-based applications can also request the native shell
+        # filename formats directly. Supplying them makes the drag reliable
+        # across both kinds of target.
+        filename_w = (str(resolved_path) + "\0").encode("utf-16le")
+        mime_data.setData(
+            'application/x-qt-windows-mime;value="FileNameW"',
+            filename_w,
+        )
+        mime_data.setData(
+            'application/x-qt-windows-mime;value="Preferred DropEffect"',
+            struct.pack("<I", 1),  # DROPEFFECT_COPY
+        )
+
+    return mime_data
 
 
 class WorkflowDragIcon(QLabel):
@@ -211,15 +237,14 @@ class WorkflowDragIcon(QLabel):
         if workflow_path is None:
             return
 
-        mime_data = QMimeData()
-        mime_data.setUrls([QUrl.fromLocalFile(str(workflow_path))])
-        mime_data.setText(str(workflow_path))
+        workflow_path = workflow_path.expanduser().resolve()
+        mime_data = workflow_drag_mime_data(workflow_path)
 
         drag = QDrag(self)
         drag.setMimeData(mime_data)
         if self.pixmap() is not None:
             drag.setPixmap(self.pixmap())
-        drag.exec(Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.CopyAction, Qt.DropAction.CopyAction)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def mouseReleaseEvent(self, event) -> None:

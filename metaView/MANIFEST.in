@@ -1,2 +1,0 @@
-recursive-include src/metaview/assets *.png *.ico
-include README.md LICENSE CHANGELOG.md

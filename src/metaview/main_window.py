@@ -1576,7 +1576,7 @@ class MainWindow(QMainWindow):
                 json.dumps(workflow, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            return workflow_path
+            return workflow_path.resolve()
         except OSError as error:
             if show_errors:
                 QMessageBox.critical(self, "Unable to export workflow", str(error))

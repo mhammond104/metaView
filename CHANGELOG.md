@@ -1,5 +1,12 @@
 # Changelog
 
+
+
+## Unreleased
+
+- Display image resolution in Comparison View and Experiment View, highlighting differences.
+- Improve workflow JSON drag-and-drop compatibility on Windows, including File Explorer and Chromium-based targets.
+
 All notable changes to metaView will be documented here.
 
 ## [0.2.0]
