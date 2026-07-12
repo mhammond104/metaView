@@ -103,3 +103,37 @@ Generation metadata processing is split into presentation-independent modules:
 Compare View and Experiment View render the same structured comparison result.
 Future experimentation-notebook services should consume these modules directly
 rather than reproducing parsing or difference-detection logic in Qt widgets.
+
+## Experimentation notebook backend
+
+The experimentation notebook is implemented as a headless domain layer under
+`metaview.experiments`. It does not import Qt and can therefore be used by the
+future notebook UI, command-line tooling, migrations, and tests.
+
+- `models.py` defines immutable notebooks, experiments, runs, image links, and
+  scoped notes.
+- `repository.py` defines the persistence contract.
+- `sqlite.py` owns the versioned SQLite schema and all SQL.
+- `service.py` implements application workflows, including retrospective
+  creation of one run per selected image.
+
+Experiment images are referenced by resolved filesystem path and are never
+copied into the notebook database. Missing files remain represented so a later
+UI can report and relink them. Deleting a notebook cascades through its
+experiments, runs, image associations, and notes.
+
+
+## Experiment creation workflow
+
+Phase 2 introduces the first Qt presentation layer for the experimentation
+backend. `metaview.experiments.ui` contains the creation and summary dialogs,
+while `metaview.experiments.analysis` remains headless and converts parsed image
+metadata into fixed fields, variable fields, missing values, and consistency
+warnings.
+
+`MainWindow` owns one `ExperimentService` connected to `experiments.sqlite3`. A
+thumbnail selection can be persisted from either the action row or the
+thumbnail context menu. Each selected image becomes one ordered run; files are
+referenced rather than copied. After creation, the summary dialog displays the
+runs as a filmstrip and renders the analysis without querying SQLite or parsing
+metadata itself.

@@ -2,7 +2,22 @@
 
 
 
+### Experimentation notebook — Phase 1
+
+- Added Qt-independent notebook, experiment, run, image-link, and note models.
+- Added a versioned SQLite experimentation repository with cascading ownership.
+- Added services for creating notebooks, experiments and runs, attaching images,
+  and creating retrospective experiments from selected images.
+- Added persistence and domain tests, including missing-image references and
+  cascade deletion.
+
 ## Unreleased
+
+### Added
+
+- Added the first experimentation-notebook workflow: create a persistent experiment from selected thumbnails.
+- Added inline notebook creation, ordered runs, an experiment filmstrip, and immediate fixed/variable metadata analysis.
+- Added consistency warnings for differing prompts, models, resolutions, and partially missing metadata.
 
 ### Changed
 
@@ -60,4 +75,3 @@ All notable changes to metaView will be documented here.
 - Persistent 0–5 star ratings with filtering and sorting.
 - Experiment View for identical-positive-prompt image groups.
 - Cross-platform source layout and GitHub Actions workflows.
-

@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -102,6 +103,8 @@ from .prompt_library import (
     import_legacy_prompt_library,
 )
 from .workers import MetadataWorker, ThumbnailWorker
+from .experiments import ExperimentService, SQLiteExperimentRepository, AnalysedImage, analyse_images
+from .experiments.ui import CreateExperimentDialog, ExperimentSummaryDialog
 
 def legacy_prompt_library_database_path() -> Path:
     base = QStandardPaths.writableLocation(
@@ -128,6 +131,15 @@ def image_index_database_path() -> Path:
     directory = Path(base or (Path.home() / ".metaview"))
     directory.mkdir(parents=True, exist_ok=True)
     return directory / "image_index.sqlite3"
+
+def experiment_database_path() -> Path:
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation
+    )
+    directory = Path(base or (Path.home() / ".metaview"))
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "experiments.sqlite3"
+
 
 
 class MainWindow(QMainWindow):
@@ -165,6 +177,9 @@ class MainWindow(QMainWindow):
         )
         self.image_index = ImageIndexService(
             SQLiteImageIndexRepository(image_index_database_path())
+        )
+        self.experiment_service = ExperimentService(
+            SQLiteExperimentRepository(experiment_database_path())
         )
         self.prompt_library = PromptLibraryController(
             self.prompt_repository,
@@ -226,6 +241,8 @@ class MainWindow(QMainWindow):
         self.image_list.itemSelectionChanged.connect(self.thumbnail_selection_changed)
         self.image_list.verticalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
         self.image_list.horizontalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
+        self.image_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.image_list.customContextMenuRequested.connect(self.show_thumbnail_context_menu)
 
         self.filename_search_box = QLineEdit()
         self.filename_search_box.setPlaceholderText("Search filename…")
@@ -350,6 +367,10 @@ class MainWindow(QMainWindow):
         self.experiment_view_button.setEnabled(False)
         self.experiment_view_button.clicked.connect(self.open_experiment_view)
 
+        self.create_experiment_button = QPushButton("Create Experiment")
+        self.create_experiment_button.setEnabled(False)
+        self.create_experiment_button.clicked.connect(self.create_experiment_from_selection)
+
         self.compare_button = QPushButton("Compare")
         self.compare_button.setEnabled(False)
         self.compare_button.clicked.connect(self.compare_selected_images)
@@ -385,6 +406,7 @@ class MainWindow(QMainWindow):
         action_layout.addSpacing(12)
         action_layout.addWidget(self.find_similar_button)
         action_layout.addWidget(self.experiment_view_button)
+        action_layout.addWidget(self.create_experiment_button)
         action_layout.addWidget(self.compare_button)
         action_layout.addWidget(self.open_image_button)
 
@@ -1102,6 +1124,7 @@ class MainWindow(QMainWindow):
             self.open_image_button.setEnabled(False)
             self.find_similar_button.setEnabled(False)
             self.experiment_view_button.setEnabled(False)
+            self.create_experiment_button.setEnabled(False)
             self.update_rating_controls(0, enabled=False)
             self.metadata_panel.clear()
             return
@@ -1467,6 +1490,74 @@ class MainWindow(QMainWindow):
             + ", ".join(selected_names)
         )
 
+
+    def selected_image_paths(self) -> list[Path]:
+        paths: list[Path] = []
+        for item in self.image_list.selectedItems():
+            value = item.data(PATH_ROLE)
+            if isinstance(value, str):
+                paths.append(Path(value))
+        return paths
+
+    def show_thumbnail_context_menu(self, position: QPoint) -> None:
+        item = self.image_list.itemAt(position)
+        if item is not None and not item.isSelected():
+            self.image_list.clearSelection()
+            item.setSelected(True)
+            self.image_list.setCurrentItem(item)
+        selected = self.selected_image_paths()
+        if not selected:
+            return
+        menu = QMenu(self.image_list)
+        compare_action = menu.addAction("Compare…")
+        compare_action.setEnabled(len(selected) == 2)
+        compare_action.triggered.connect(self.compare_selected_images)
+        similar_action = menu.addAction("Find Similar…")
+        similar_action.setEnabled(len(selected) == 1)
+        similar_action.triggered.connect(self.find_similar_images)
+        menu.addSeparator()
+        create_action = menu.addAction("Create Experiment…")
+        create_action.triggered.connect(self.create_experiment_from_selection)
+        menu.exec(self.image_list.viewport().mapToGlobal(position))
+
+    def create_experiment_from_selection(self) -> None:
+        paths = self.selected_image_paths()
+        if not paths:
+            QMessageBox.information(self, "Select images", "Select one or more thumbnails to create an experiment.")
+            return
+        notebooks = self.experiment_service.repository.list_notebooks()
+        dialog = CreateExperimentDialog(notebooks, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            notebook = (
+                self.experiment_service.create_notebook(dialog.notebook_title)
+                if dialog.notebook_id is None
+                else self.experiment_service.repository.get_notebook(dialog.notebook_id)
+            )
+            if notebook is None or notebook.id is None:
+                raise RuntimeError("The selected notebook is no longer available")
+            aggregate = self.experiment_service.create_experiment_from_images(
+                notebook.id, dialog.title, paths, description=dialog.experiment_description
+            )
+            analysed = []
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                for path in paths:
+                    metadata = read_image_metadata(path)
+                    analysed.append(AnalysedImage(path, metadata, extract_summary(metadata)))
+            finally:
+                QApplication.restoreOverrideCursor()
+            analysis = analyse_images(analysed)
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not create experiment", str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Created experiment '{aggregate.experiment.title}' with {len(paths)} run{'s' if len(paths) != 1 else ''}",
+            5000,
+        )
+        ExperimentSummaryDialog(notebook, aggregate, analysis, self).exec()
+
     def thumbnail_selection_changed(self) -> None:
         """Refresh selection-dependent actions for any thumbnail selection change."""
         self.update_compare_button()
@@ -1475,6 +1566,7 @@ class MainWindow(QMainWindow):
             self.open_image_button.setEnabled(False)
             self.find_similar_button.setEnabled(False)
             self.experiment_view_button.setEnabled(False)
+            self.create_experiment_button.setEnabled(False)
             self.update_rating_controls(0, enabled=False)
             return
 
@@ -1492,6 +1584,7 @@ class MainWindow(QMainWindow):
         # Experiment View is defined around one unambiguous starting image.
         # It must not remain enabled when a multi-selection is active.
         self.experiment_view_button.setEnabled(len(selected) == 1)
+        self.create_experiment_button.setEnabled(bool(selected))
 
     def update_compare_button(self) -> None:
         self.compare_button.setEnabled(
@@ -1610,6 +1703,7 @@ class MainWindow(QMainWindow):
         self.save_settings()
         self.prompt_repository.close()
         self.image_index.close()
+        self.experiment_service.close()
         super().closeEvent(event)
 
 

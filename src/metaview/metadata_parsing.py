@@ -1,7 +1,10 @@
 """Headless ComfyUI metadata parsing and normalisation primitives."""
 from __future__ import annotations
 import json
+from pathlib import Path
 from typing import Any
+
+from PIL import Image, UnidentifiedImageError
 
 def parse_json_value(value: Any) -> Any:
     if not isinstance(value, str):

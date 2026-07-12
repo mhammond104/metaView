@@ -89,8 +89,12 @@ from .metadata_parsing import (
     find_sampler,
     node_text,
     parse_json_value,
+    read_image_metadata as _read_image_metadata,
     resolve_node,
 )
+
+# Explicit facade binding retained for UI modules and frozen builds.
+read_image_metadata = _read_image_metadata
 
 def display_json(value: Any) -> str:
     if value is None:
