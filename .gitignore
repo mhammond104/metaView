@@ -30,3 +30,9 @@ Thumbs.db
 
 # Generated screenshots and temporary files
 screenshots/*.tmp
+
+# PyInstaller/runtime build output
+_internal/
+build/
+dist/
+*.spec
