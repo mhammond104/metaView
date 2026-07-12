@@ -1556,7 +1556,7 @@ class MainWindow(QMainWindow):
             f"Created experiment '{aggregate.experiment.title}' with {len(paths)} run{'s' if len(paths) != 1 else ''}",
             5000,
         )
-        ExperimentSummaryDialog(notebook, aggregate, analysis, self).exec()
+        ExperimentSummaryDialog(self.experiment_service, notebook, aggregate.experiment.id, analysis, self).exec()
 
     def thumbnail_selection_changed(self) -> None:
         """Refresh selection-dependent actions for any thumbnail selection change."""

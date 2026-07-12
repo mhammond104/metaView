@@ -137,3 +137,8 @@ thumbnail context menu. Each selected image becomes one ordered run; files are
 referenced rather than copied. After creation, the summary dialog displays the
 runs as a filmstrip and renders the analysis without querying SQLite or parsing
 metadata itself.
+
+
+## Persistent experiment window
+
+`metaview.experiments.ui.ExperimentWindow` loads experiments by ID through `ExperimentService`. It provides A/B selection across persisted runs, reuses the headless metadata comparison services, and saves run observations and experiment conclusions through the service layer rather than writing to SQLite directly.

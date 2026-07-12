@@ -51,3 +51,22 @@ def test_service_rejects_missing_parents_and_empty_selection(service):
     notebook = service.create_notebook("Tests")
     with pytest.raises(ValueError):
         service.create_experiment_from_images(notebook.id, "Empty", [])
+
+
+def test_update_run_notes_and_conclusion(service):
+    notebook = service.create_notebook("Notebook")
+    aggregate = service.create_experiment_from_images(
+        notebook.id, "Experiment", [Path("one.png")]
+    )
+    run = aggregate.runs[0]
+
+    updated_run = service.update_run_notes(run.id, "Useful observation")
+    updated_experiment = service.update_experiment_conclusion(
+        aggregate.experiment.id, "Six steps is sufficient"
+    )
+
+    assert updated_run.notes == "Useful observation"
+    assert updated_experiment.conclusion == "Six steps is sufficient"
+    reloaded = service.load_experiment(aggregate.experiment.id)
+    assert reloaded.runs[0].notes == "Useful observation"
+    assert reloaded.experiment.conclusion == "Six steps is sufficient"

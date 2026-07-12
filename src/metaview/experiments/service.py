@@ -70,5 +70,17 @@ class ExperimentService:
             images_by_run={run.id: tuple(self.repository.list_run_images(run.id)) for run in runs if run.id is not None},
         )
 
+    def update_run_notes(self, run_id: int, notes: str) -> ExperimentRun:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ExperimentNotFoundError(f"Run {run_id} was not found")
+        return self.repository.update_run(run.with_updates(notes=notes))
+
+    def update_experiment_conclusion(self, experiment_id: int, conclusion: str) -> Experiment:
+        experiment = self.repository.get_experiment(experiment_id)
+        if experiment is None:
+            raise ExperimentNotFoundError(f"Experiment {experiment_id} was not found")
+        return self.repository.update_experiment(experiment.with_updates(conclusion=conclusion))
+
     def close(self) -> None:
         self.repository.close()

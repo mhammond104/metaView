@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Added
+- Persistent Experiment Window with selectable A/B images, thumbnail filmstrip, parameter, prompt and LoRA comparison, experiment summary, consistency warnings, editable run notes, and editable experiment conclusions.
+- Experiment service operations for updating run notes and conclusions.
+
+
 
 ### Experimentation notebook — Phase 1
 
