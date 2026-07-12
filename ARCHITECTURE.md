@@ -86,3 +86,20 @@ The main thumbnail browser supports a temporary global prompt-results source.
 Before entering it, `MainWindow` captures directory, searches, metadata filters,
 rating filter, sort order, selection, current image, and scroll position. The
 "Return to previous view" action restores that state.
+
+## Metadata parsing and comparison services
+
+Generation metadata processing is split into presentation-independent modules:
+
+- `metaview.metadata_parsing` parses ComfyUI prompt metadata and extracts the
+  standard generation summary and LoRA records. It has no Qt dependency.
+- `metaview.metadata_normalization` defines canonical prompt, text, and LoRA
+  comparison rules.
+- `metaview.comparison` produces structured parameter and LoRA comparison
+  objects, including image resolution differences. It has no Qt dependency.
+- `metaview.metadata` remains the UI-facing metadata facade and retains image
+  loading, JSON display, and thumbnail-cache helpers.
+
+Compare View and Experiment View render the same structured comparison result.
+Future experimentation-notebook services should consume these modules directly
+rather than reproducing parsing or difference-detection logic in Qt widgets.

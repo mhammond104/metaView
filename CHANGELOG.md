@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+### Changed
+
+- Extracted ComfyUI metadata parsing into a Qt-independent service.
+- Added canonical prompt and LoRA normalisation helpers.
+- Added reusable structured parameter and LoRA comparison services.
+- Refactored Compare View and Experiment View to use the shared comparison logic.
+
+## Unreleased
+
 - Display image resolution in Comparison View and Experiment View, highlighting differences.
 - Improve workflow JSON drag-and-drop compatibility on Windows, including File Explorer and Chromium-based targets.
 

@@ -373,34 +373,31 @@ class ComparisonDialog(QDialog):
         return widget
 
     def _populate_lora_tables(self) -> None:
-        loras_a = {item["name"]: item for item in extract_loras(self.metadata_a)}
-        loras_b = {item["name"]: item for item in extract_loras(self.metadata_b)}
-        names = sorted(set(loras_a) | set(loras_b), key=str.casefold)
-
-        self.lora_table_a.setRowCount(len(names))
-        self.lora_table_b.setRowCount(len(names))
+        comparisons = compare_loras(self.metadata_a, self.metadata_b)
+        self.lora_table_a.clearSpans()
+        self.lora_table_b.clearSpans()
+        self.lora_table_a.setRowCount(len(comparisons))
+        self.lora_table_b.setRowCount(len(comparisons))
         difference_brush = QBrush(QColor(58, 79, 102))
         missing_brush = QBrush(QColor(92, 52, 52))
         foreground = QBrush(QColor(255, 255, 255))
 
-        for row, name in enumerate(names):
-            item_a = loras_a.get(name)
-            item_b = loras_b.get(name)
+        for row, comparison in enumerate(comparisons):
+            value_a = comparison.value_a
+            value_b = comparison.value_b
             values_a = (
-                name if item_a else f"{name} (not used)",
-                item_a["model_strength"] if item_a else "—",
-                item_a["clip_strength"] if item_a else "—",
+                comparison.display_name if value_a else f"{comparison.display_name} (not used)",
+                value_a.model_strength if value_a else "—",
+                value_a.clip_strength if value_a else "—",
             )
             values_b = (
-                name if item_b else f"{name} (not used)",
-                item_b["model_strength"] if item_b else "—",
-                item_b["clip_strength"] if item_b else "—",
+                comparison.display_name if value_b else f"{comparison.display_name} (not used)",
+                value_b.model_strength if value_b else "—",
+                value_b.clip_strength if value_b else "—",
             )
-            differs = item_a != item_b
-
             for table, values, present in (
-                (self.lora_table_a, values_a, item_a is not None),
-                (self.lora_table_b, values_b, item_b is not None),
+                (self.lora_table_a, values_a, value_a is not None),
+                (self.lora_table_b, values_b, value_b is not None),
             ):
                 for column, value in enumerate(values):
                     cell = QTableWidgetItem(value)
@@ -409,12 +406,12 @@ class ComparisonDialog(QDialog):
                     if not present:
                         cell.setBackground(missing_brush)
                         cell.setForeground(foreground)
-                    elif differs:
+                    elif comparison.differs:
                         cell.setBackground(difference_brush)
                         cell.setForeground(foreground)
                     table.setItem(row, column, cell)
 
-        if not names:
+        if not comparisons:
             for table in (self.lora_table_a, self.lora_table_b):
                 table.setRowCount(1)
                 message = QTableWidgetItem("No LoRAs detected")
@@ -648,47 +645,46 @@ class ExperimentDialog(QDialog):
         QTimer.singleShot(0, self.fit_both)
 
     def _populate_parameter_table(self) -> None:
-        fields = [
-            ("Filename", self.path_a.name, self.path_b.name),
-            ("Model", self.summary_a["model"], self.summary_b["model"]),
-            ("Seed", self.summary_a["seed"], self.summary_b["seed"]),
-            ("Steps", self.summary_a["steps"], self.summary_b["steps"]),
-            ("CFG", self.summary_a["cfg"], self.summary_b["cfg"]),
-            ("Sampler", self.summary_a["sampler"], self.summary_b["sampler"]),
-            ("Scheduler", self.summary_a["scheduler"], self.summary_b["scheduler"]),
-            ("Denoise", self.summary_a["denoise"], self.summary_b["denoise"]),
-            ("Resolution", ComparisonDialog._resolution(self.path_a), ComparisonDialog._resolution(self.path_b)),
-        ]
+        fields = compare_parameters(self.path_a, self.summary_a, self.path_b, self.summary_b)
         self.table.setRowCount(len(fields))
         difference_brush = QBrush(QColor(58, 79, 102))
         foreground = QBrush(QColor(255, 255, 255))
-        for row, (field, a, b) in enumerate(fields):
-            for column, value in enumerate((field, a or "—", b or "—")):
+        for row, field in enumerate(fields):
+            for column, value in enumerate((field.name, field.value_a or "—", field.value_b or "—")):
                 item = QTableWidgetItem(str(value))
-                if column in (1, 2) and str(a) != str(b):
+                if column in (1, 2) and field.differs:
                     item.setBackground(difference_brush)
                     item.setForeground(foreground)
                 self.table.setItem(row, column, item)
         self.table.resizeRowsToContents()
 
     def _populate_lora_tables(self) -> None:
-        loras_a = {item["name"]: item for item in extract_loras(self.metadata_a)}
-        loras_b = {item["name"]: item for item in extract_loras(self.metadata_b)}
-        names = sorted(set(loras_a) | set(loras_b), key=str.casefold)
+        comparisons = compare_loras(self.metadata_a, self.metadata_b)
         self.lora_table_a.clearSpans()
         self.lora_table_b.clearSpans()
-        self.lora_table_a.setRowCount(len(names))
-        self.lora_table_b.setRowCount(len(names))
+        self.lora_table_a.setRowCount(len(comparisons))
+        self.lora_table_b.setRowCount(len(comparisons))
         difference_brush = QBrush(QColor(58, 79, 102))
         missing_brush = QBrush(QColor(92, 52, 52))
         foreground = QBrush(QColor(255, 255, 255))
-        for row, name in enumerate(names):
-            item_a = loras_a.get(name)
-            item_b = loras_b.get(name)
-            values_a = (name if item_a else f"{name} (not used)", item_a["model_strength"] if item_a else "—", item_a["clip_strength"] if item_a else "—")
-            values_b = (name if item_b else f"{name} (not used)", item_b["model_strength"] if item_b else "—", item_b["clip_strength"] if item_b else "—")
-            differs = item_a != item_b
-            for table, values, present in ((self.lora_table_a, values_a, item_a is not None), (self.lora_table_b, values_b, item_b is not None)):
+
+        for row, comparison in enumerate(comparisons):
+            value_a = comparison.value_a
+            value_b = comparison.value_b
+            values_a = (
+                comparison.display_name if value_a else f"{comparison.display_name} (not used)",
+                value_a.model_strength if value_a else "—",
+                value_a.clip_strength if value_a else "—",
+            )
+            values_b = (
+                comparison.display_name if value_b else f"{comparison.display_name} (not used)",
+                value_b.model_strength if value_b else "—",
+                value_b.clip_strength if value_b else "—",
+            )
+            for table, values, present in (
+                (self.lora_table_a, values_a, value_a is not None),
+                (self.lora_table_b, values_b, value_b is not None),
+            ):
                 for column, value in enumerate(values):
                     cell = QTableWidgetItem(value)
                     if column in (1, 2):
@@ -696,17 +692,19 @@ class ExperimentDialog(QDialog):
                     if not present:
                         cell.setBackground(missing_brush)
                         cell.setForeground(foreground)
-                    elif differs:
+                    elif comparison.differs:
                         cell.setBackground(difference_brush)
                         cell.setForeground(foreground)
                     table.setItem(row, column, cell)
-        if not names:
+
+        if not comparisons:
             for table in (self.lora_table_a, self.lora_table_b):
                 table.setRowCount(1)
+                message = QTableWidgetItem("No LoRAs detected")
+                message.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 table.setSpan(0, 0, 1, 3)
-                cell = QTableWidgetItem("No LoRAs detected")
-                cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                table.setItem(0, 0, cell)
+                table.setItem(0, 0, message)
+
         self.lora_table_a.resizeRowsToContents()
         self.lora_table_b.resizeRowsToContents()
 

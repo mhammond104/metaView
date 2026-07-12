@@ -5,15 +5,13 @@ from PySide6.QtCore import QUrl
 from metaview.widgets import workflow_drag_mime_data
 
 
-def test_comparison_and_experiment_views_include_resolution() -> None:
+def test_comparison_and_experiment_views_use_shared_parameter_service() -> None:
     source = (
         Path(__file__).resolve().parents[1] / "src" / "metaview" / "dialogs.py"
     ).read_text(encoding="utf-8")
 
-    comparison_row = '("Resolution", self._resolution(self.path_a), self._resolution(self.path_b))'
-    experiment_row = '("Resolution", ComparisonDialog._resolution(self.path_a), ComparisonDialog._resolution(self.path_b))'
-    assert comparison_row in source
-    assert experiment_row in source
+    assert source.count("compare_parameters(") >= 2
+    assert "format_resolution(path)" in source
 
 
 def test_workflow_drag_payload_contains_local_file_url(tmp_path: Path) -> None:
