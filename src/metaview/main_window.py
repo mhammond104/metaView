@@ -322,7 +322,7 @@ class MainWindow(QMainWindow):
         search_row.setObjectName("searchRow")
         search_layout = QHBoxLayout(search_row)
         search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.setSpacing(4)
+        search_layout.setSpacing(3)
         search_layout.addWidget(self.filename_search_box)
         search_layout.addWidget(self.prompt_search_box)
         search_layout.addWidget(QLabel("Sort:"))
@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
         self.prompt_view_bar.setFrameShape(QFrame.Shape.StyledPanel)
         self.prompt_view_bar.setVisible(False)
         prompt_view_layout = QHBoxLayout(self.prompt_view_bar)
-        prompt_view_layout.setContentsMargins(8, 5, 8, 5)
+        prompt_view_layout.setContentsMargins(6, 3, 6, 3)
         self.prompt_view_label = QLabel()
         self.return_prompt_view_button = QPushButton("Return to previous view")
         self.return_prompt_view_button.clicked.connect(self.return_from_prompt_view)
@@ -419,8 +419,8 @@ class MainWindow(QMainWindow):
         action_strip = QFrame()
         action_strip.setObjectName("mainActionStrip")
         action_layout = QHBoxLayout(action_strip)
-        action_layout.setContentsMargins(10, 7, 10, 7)
-        action_layout.setSpacing(6)
+        action_layout.setContentsMargins(7, 4, 7, 4)
+        action_layout.setSpacing(3)
         action_layout.addStretch(1)
         action_layout.addWidget(self.rating_label)
         for button in self.rating_buttons:
@@ -802,8 +802,8 @@ class MainWindow(QMainWindow):
 
         contents = QWidget()
         layout = QHBoxLayout(contents)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(3, 1, 3, 1)
+        layout.setSpacing(3)
         layout.addStretch(1)
 
         scroll = QScrollArea()
@@ -828,7 +828,7 @@ class MainWindow(QMainWindow):
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(2, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
         label = QLabel(f"{title}:")
         label.setMinimumWidth(68)

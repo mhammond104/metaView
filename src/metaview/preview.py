@@ -267,8 +267,8 @@ class PreviewWindow(QMainWindow):
         self.toolbar_overlay = QFrame(self)
         self.toolbar_overlay.setObjectName("previewToolbarOverlay")
         layout = QHBoxLayout(self.toolbar_overlay)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setSpacing(1)
 
         for action in (
             self.previous_action,
@@ -286,7 +286,7 @@ class PreviewWindow(QMainWindow):
                 separator = QFrame(self.toolbar_overlay)
                 separator.setFrameShape(QFrame.Shape.VLine)
                 separator.setStyleSheet(
-                    "color: rgba(255, 255, 255, 45); margin: 5px 3px;"
+                    "color: rgba(255, 255, 255, 45); margin: 4px 2px;"
                 )
                 layout.addWidget(separator)
                 continue

@@ -84,13 +84,13 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     QMenuBar {{
         background: {theme.alternate};
         border-bottom: 1px solid {theme.border};
-        padding: 3px 8px;
+        padding: 2px 6px;
         spacing: 3px;
     }}
     QMenuBar::item {{
         background: transparent;
         border-radius: 5px;
-        padding: 6px 10px;
+        padding: 4px 8px;
     }}
     QMenuBar::item:selected, QMenuBar::item:pressed {{
         background: {theme.surface};
@@ -99,12 +99,12 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     QMenu {{
         background: {theme.alternate};
         border: 1px solid {theme.border};
-        border-radius: 8px;
-        padding: 6px;
+        border-radius: 7px;
+        padding: 4px;
     }}
     QMenu::item {{
         border-radius: 5px;
-        padding: 7px 30px 7px 28px;
+        padding: 5px 25px 5px 24px;
         margin: 1px 0;
     }}
     QMenu::item:selected {{
@@ -115,7 +115,7 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     QMenu::separator {{
         height: 1px;
         background: {theme.border};
-        margin: 6px 9px;
+        margin: 4px 7px;
     }}
     QMenu::indicator {{ left: 8px; width: 14px; height: 14px; }}
 
@@ -123,14 +123,14 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         background: {theme.alternate};
         border: 0;
         border-bottom: 1px solid {theme.border};
-        spacing: 5px;
-        padding: 7px 9px;
+        spacing: 3px;
+        padding: 4px 6px;
     }}
     QToolBar#mainToolbar QToolButton {{
         background: transparent;
         border: 0;
         border-radius: 6px;
-        padding: 7px 11px;
+        padding: 5px 8px;
     }}
     QToolBar#mainToolbar QToolButton:hover {{ background: {theme.surface}; }}
     QToolBar#mainToolbar QToolButton:pressed {{
@@ -142,7 +142,7 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         background: {theme.alternate};
         color: {theme.muted};
         border-top: 1px solid {theme.border};
-        padding: 2px 8px;
+        padding: 1px 6px;
     }}
     QStatusBar::item {{ border: 0; }}
 
@@ -156,27 +156,27 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         selection-color: {theme.accent_text};
     }}
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
-        padding: 6px 9px;
-        min-height: 24px;
+        padding: 4px 7px;
+        min-height: 20px;
     }}
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
     QTreeView:focus, QListWidget:focus, QTableWidget:focus, QComboBox:focus {{
         border: 1px solid {theme.accent};
     }}
-    QComboBox::drop-down {{ border: 0; width: 24px; }}
+    QComboBox::drop-down {{ border: 0; width: 20px; }}
     QComboBox QAbstractItemView {{
         background: {theme.alternate};
         color: {theme.text};
         border: 1px solid {theme.border};
         selection-background-color: {theme.accent};
-        padding: 4px;
+        padding: 3px;
     }}
 
-    QTreeView, QListWidget, QTableWidget {{ padding: 3px; }}
+    QTreeView, QListWidget, QTableWidget {{ padding: 2px; }}
     QTreeView::item, QListWidget::item {{
-        border-radius: 5px;
-        padding: 4px;
-        margin: 1px;
+        border-radius: 4px;
+        padding: 3px;
+        margin: 0px;
     }}
     QTreeView::item:hover, QListWidget::item:hover {{ background: {theme.surface}; }}
     QTreeView::item:selected, QListWidget::item:selected {{
@@ -188,9 +188,9 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         background: {theme.surface};
         color: {theme.text};
         border: 1px solid {theme.border};
-        border-radius: 6px;
-        padding: 6px 11px;
-        min-height: 22px;
+        border-radius: 5px;
+        padding: 4px 8px;
+        min-height: 19px;
     }}
     QPushButton:hover, QToolButton:hover {{
         background: {theme.surface_hover};
@@ -231,7 +231,7 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
 
     QTabWidget::pane {{
         border: 1px solid {theme.border};
-        border-radius: 7px;
+        border-radius: 6px;
         top: -1px;
     }}
     QTabBar::tab {{
@@ -239,8 +239,8 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         color: {theme.muted};
         border: 0;
         border-bottom: 2px solid transparent;
-        padding: 8px 13px;
-        margin-right: 2px;
+        padding: 6px 10px;
+        margin-right: 1px;
     }}
     QTabBar::tab:hover {{ color: {theme.text}; background: {theme.surface}; }}
     QTabBar::tab:selected {{
@@ -255,18 +255,18 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         border: 0;
         border-right: 1px solid {theme.border};
         border-bottom: 1px solid {theme.border};
-        padding: 7px;
+        padding: 5px 6px;
         font-weight: 600;
     }}
     QTableWidget {{ gridline-color: {theme.border}; }}
 
-    QScrollBar:vertical {{ background: transparent; width: 11px; margin: 2px; }}
-    QScrollBar:horizontal {{ background: transparent; height: 11px; margin: 2px; }}
+    QScrollBar:vertical {{ background: transparent; width: 9px; margin: 1px; }}
+    QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 1px; }}
     QScrollBar::handle {{
         background: {theme.border};
-        min-height: 30px;
-        min-width: 30px;
-        border-radius: 5px;
+        min-height: 24px;
+        min-width: 24px;
+        border-radius: 4px;
     }}
     QScrollBar::handle:hover {{ background: {theme.surface_hover}; }}
     QScrollBar::add-line, QScrollBar::sub-line,
@@ -279,35 +279,35 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
 
     QGroupBox {{
         border: 1px solid {theme.border};
-        border-radius: 7px;
-        margin-top: 10px;
-        padding-top: 8px;
+        border-radius: 6px;
+        margin-top: 8px;
+        padding-top: 6px;
         font-weight: 600;
     }}
-    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; }}
 
-    QCheckBox, QRadioButton {{ spacing: 7px; }}
-    QCheckBox::indicator, QRadioButton::indicator {{ width: 15px; height: 15px; }}
+    QCheckBox, QRadioButton {{ spacing: 5px; }}
+    QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; }}
 
     QToolTip {{
         background: {theme.surface};
         color: {theme.text};
         border: 1px solid {theme.border};
-        border-radius: 5px;
-        padding: 6px 8px;
+        border-radius: 4px;
+        padding: 4px 6px;
     }}
     QLabel {{ background: transparent; }}
 
     QFrame#previewToolbarOverlay {{
         background-color: {theme.alternate};
         border: 1px solid {theme.border};
-        border-radius: 10px;
+        border-radius: 8px;
     }}
     QFrame#previewToolbarOverlay QToolButton {{
         background: transparent;
         border: 0;
-        border-radius: 6px;
-        padding: 6px 9px;
+        border-radius: 5px;
+        padding: 4px 7px;
     }}
     QFrame#previewToolbarOverlay QToolButton:hover {{ background: {theme.surface_hover}; }}
     """)
