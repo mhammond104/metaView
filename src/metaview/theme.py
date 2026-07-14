@@ -1,238 +1,98 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import re
-import sqlite3
-import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
 
-from PIL import Image, UnidentifiedImageError
-from PySide6.QtCore import (
-    QDir,
-    QFileSystemWatcher,
-    QPoint,
-    QRectF,
-    QMimeData,
-    QObject,
-    QRunnable,
-    QSettings,
-    QSize,
-    QStandardPaths,
-    Qt,
-    QThreadPool,
-    QTimer,
-    Signal,
-    QUrl,
-)
-from PySide6.QtGui import (
-    QAction,
-    QDesktopServices,
-    QDrag,
-    QColor,
-    QIcon,
-    QImage,
-    QImageReader,
-    QPixmap,
-    QPalette,
-    QPainter,
-    QPainterPath,
-    QFont,
-    QPen,
-    QPolygon,
-    QBrush,
-)
-from PySide6.QtWidgets import (
-    QApplication,
-    QAbstractItemView,
-    QButtonGroup,
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QFileDialog,
-    QFileSystemModel,
-    QFormLayout,
-    QHeaderView,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
-    QMainWindow,
-    QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QScrollArea,
-    QSplashScreen,
-    QSplitter,
-    QStackedWidget,
-    QTabWidget,
-    QTableWidget,
-    QTableWidgetItem,
-    QToolBar,
-    QToolButton,
-    QTreeView,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import Qt, QSettings, QRectF, QSize
+from PySide6.QtGui import QColor, QPalette, QPainter, QPixmap, QFont
+from PySide6.QtWidgets import QApplication
 
 from .constants import asset_path
 
-def apply_dark_theme(app: QApplication) -> None:
-    """Apply a consistent cross-platform dark palette and widget styling."""
 
+@dataclass(frozen=True)
+class Theme:
+    key: str
+    name: str
+    window: str
+    base: str
+    alternate: str
+    surface: str
+    surface_hover: str
+    text: str
+    muted: str
+    border: str
+    accent: str
+    accent_text: str
+    danger: str
+    light: bool = False
+
+
+THEMES = {
+    "catppuccin_mocha": Theme("catppuccin_mocha", "Catppuccin Mocha", "#1e1e2e", "#11111b", "#181825", "#313244", "#45475a", "#cdd6f4", "#a6adc8", "#585b70", "#89b4fa", "#11111b", "#f38ba8"),
+    "gruvbox_dark": Theme("gruvbox_dark", "Gruvbox Dark", "#282828", "#1d2021", "#32302f", "#3c3836", "#504945", "#ebdbb2", "#a89984", "#665c54", "#d79921", "#282828", "#fb4934"),
+    "tokyo_night": Theme("tokyo_night", "Tokyo Night", "#1a1b26", "#16161e", "#24283b", "#292e42", "#3b4261", "#c0caf5", "#9aa5ce", "#414868", "#7aa2f7", "#16161e", "#f7768e"),
+    "dracula": Theme("dracula", "Dracula", "#282a36", "#21222c", "#343746", "#44475a", "#56596c", "#f8f8f2", "#bfbfbf", "#6272a4", "#bd93f9", "#282a36", "#ff5555"),
+    "catppuccin_latte": Theme("catppuccin_latte", "Catppuccin Latte", "#eff1f5", "#e6e9ef", "#dce0e8", "#ccd0da", "#bcc0cc", "#4c4f69", "#6c6f85", "#9ca0b0", "#1e66f5", "#eff1f5", "#d20f39", True),
+    "gruvbox_light": Theme("gruvbox_light", "Gruvbox Light", "#fbf1c7", "#f2e5bc", "#ebdbb2", "#d5c4a1", "#bdae93", "#3c3836", "#665c54", "#a89984", "#b57614", "#fbf1c7", "#cc241d", True),
+}
+DEFAULT_THEME = "catppuccin_mocha"
+
+
+def current_theme_key() -> str:
+    value = str(QSettings("Martin Hammond", "ComfyUI Image Browser").value("appearance/theme", DEFAULT_THEME))
+    return value if value in THEMES else DEFAULT_THEME
+
+
+def apply_theme(app: QApplication, key: str | None = None) -> Theme:
+    theme = THEMES.get(key or current_theme_key(), THEMES[DEFAULT_THEME])
     app.setStyle("Fusion")
+    p = QPalette()
+    for role, colour in (
+        (QPalette.ColorRole.Window, theme.window), (QPalette.ColorRole.WindowText, theme.text),
+        (QPalette.ColorRole.Base, theme.base), (QPalette.ColorRole.AlternateBase, theme.alternate),
+        (QPalette.ColorRole.ToolTipBase, theme.surface), (QPalette.ColorRole.ToolTipText, theme.text),
+        (QPalette.ColorRole.Text, theme.text), (QPalette.ColorRole.Button, theme.surface),
+        (QPalette.ColorRole.ButtonText, theme.text), (QPalette.ColorRole.BrightText, theme.danger),
+        (QPalette.ColorRole.Link, theme.accent), (QPalette.ColorRole.Highlight, theme.accent),
+        (QPalette.ColorRole.HighlightedText, theme.accent_text), (QPalette.ColorRole.PlaceholderText, theme.muted),
+    ):
+        p.setColor(role, QColor(colour))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(theme.muted))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(theme.muted))
+    app.setPalette(p)
+    app.setStyleSheet(f"""
+    QMainWindow, QDialog, QWidget {{ background-color:{theme.window}; color:{theme.text}; }}
+    QToolBar, QStatusBar, QMenuBar, QMenu {{ background-color:{theme.alternate}; border:none; }}
+    QToolBar {{ spacing:6px; padding:4px; border-bottom:1px solid {theme.border}; }}
+    QLineEdit,QPlainTextEdit,QTextEdit,QTreeView,QListWidget,QTableWidget,QComboBox {{ background:{theme.base}; color:{theme.text}; border:1px solid {theme.border}; border-radius:4px; selection-background-color:{theme.accent}; selection-color:{theme.accent_text}; }}
+    QLineEdit,QComboBox {{ padding:5px 7px; min-height:22px; }}
+    QTreeView::item,QListWidget::item {{ padding:3px; }}
+    QTreeView::item:selected,QListWidget::item:selected {{ background:{theme.accent}; color:{theme.accent_text}; }}
+    QPushButton,QToolButton {{ background:{theme.surface}; color:{theme.text}; border:1px solid {theme.border}; border-radius:4px; padding:5px 9px; }}
+    QPushButton:hover,QToolButton:hover {{ background:{theme.surface_hover}; }}
+    QPushButton:pressed,QToolButton:pressed,QToolButton:checked {{ background:{theme.accent}; color:{theme.accent_text}; }}
+    QPushButton:disabled,QToolButton:disabled {{ color:{theme.muted}; }}
+    QTabWidget::pane {{ border:1px solid {theme.border}; }}
+    QTabBar::tab {{ background:{theme.alternate}; color:{theme.muted}; border:1px solid {theme.border}; padding:7px 12px; }}
+    QTabBar::tab:selected {{ background:{theme.window}; color:{theme.text}; }}
+    QHeaderView::section {{ background:{theme.surface}; color:{theme.text}; border:0; border-right:1px solid {theme.border}; border-bottom:1px solid {theme.border}; padding:6px; }}
+    QTableWidget {{ gridline-color:{theme.border}; }}
+    QScrollBar:vertical {{ background:{theme.alternate}; width:13px; }} QScrollBar:horizontal {{ background:{theme.alternate}; height:13px; }}
+    QScrollBar::handle {{ background:{theme.border}; min-height:28px; min-width:28px; border-radius:5px; }} QScrollBar::handle:hover {{ background:{theme.surface_hover}; }}
+    QScrollBar::add-line,QScrollBar::sub-line {{ width:0; height:0; }}
+    QSplitter::handle {{ background:{theme.border}; }} QSplitter::handle:hover {{ background:{theme.surface_hover}; }}
+    QToolTip {{ background:{theme.surface}; color:{theme.text}; border:1px solid {theme.border}; padding:4px; }}
+    QComboBox QAbstractItemView {{ background:{theme.base}; color:{theme.text}; selection-background-color:{theme.accent}; }}
+    QLabel {{ background:transparent; }}
+    QFrame#previewToolbarOverlay {{ background-color:{theme.alternate}; border:1px solid {theme.border}; border-radius:9px; }}
+    QFrame#previewToolbarOverlay QToolButton {{ background:transparent; border:0; }}
+    QFrame#previewToolbarOverlay QToolButton:hover {{ background:{theme.surface_hover}; }}
+    """)
+    return theme
 
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(235, 235, 235))
-    palette.setColor(QPalette.ColorRole.Base, QColor(22, 22, 22))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(35, 35, 35))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(45, 45, 45))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(245, 245, 245))
-    palette.setColor(QPalette.ColorRole.Text, QColor(235, 235, 235))
-    palette.setColor(QPalette.ColorRole.Button, QColor(42, 42, 42))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(235, 235, 235))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 95, 95))
-    palette.setColor(QPalette.ColorRole.Link, QColor(90, 165, 255))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(52, 105, 165))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
-    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(145, 145, 145))
 
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(105, 105, 105))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(105, 105, 105))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(105, 105, 105))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Highlight, QColor(55, 55, 55))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.HighlightedText, QColor(130, 130, 130))
-
-    app.setPalette(palette)
-
-    app.setStyleSheet(
-        """
-        QMainWindow, QDialog, QWidget {
-            background-color: #1e1e1e;
-            color: #ebebeb;
-        }
-        QToolBar, QStatusBar, QMenuBar {
-            background-color: #242424;
-            border: none;
-        }
-        QToolBar {
-            spacing: 6px;
-            padding: 4px;
-            border-bottom: 1px solid #3a3a3a;
-        }
-        QLineEdit, QPlainTextEdit, QTextEdit, QTreeView, QListWidget, QTableWidget, QComboBox {
-            background-color: #161616;
-            color: #ebebeb;
-            border: 1px solid #444444;
-            border-radius: 4px;
-            selection-background-color: #3469a5;
-            selection-color: #ffffff;
-        }
-        QLineEdit, QComboBox {
-            padding: 5px 7px;
-            min-height: 22px;
-        }
-        QPlainTextEdit, QTextEdit, QTreeView, QListWidget, QTableWidget {
-            alternate-background-color: #232323;
-        }
-        QTreeView::item, QListWidget::item { padding: 3px; }
-        QTreeView::item:selected, QListWidget::item:selected {
-            background-color: #3469a5;
-            color: #ffffff;
-        }
-        QPushButton, QToolButton {
-            background-color: #303030;
-            color: #ebebeb;
-            border: 1px solid #4a4a4a;
-            border-radius: 4px;
-            padding: 5px 9px;
-        }
-        QPushButton:hover, QToolButton:hover {
-            background-color: #3b3b3b;
-            border-color: #666666;
-        }
-        QPushButton:pressed, QToolButton:pressed, QToolButton:checked {
-            background-color: #3469a5;
-            border-color: #4a85c6;
-            color: #ffffff;
-        }
-        QPushButton:disabled, QToolButton:disabled {
-            background-color: #252525;
-            color: #707070;
-            border-color: #333333;
-        }
-        QTabWidget::pane {
-            border: 1px solid #3f3f3f;
-            background-color: #1e1e1e;
-        }
-        QTabBar::tab {
-            background-color: #292929;
-            color: #cfcfcf;
-            border: 1px solid #3f3f3f;
-            border-bottom: none;
-            padding: 7px 12px;
-            margin-right: 1px;
-        }
-        QTabBar::tab:selected {
-            background-color: #1e1e1e;
-            color: #ffffff;
-        }
-        QTabBar::tab:hover:!selected { background-color: #343434; }
-        QHeaderView::section {
-            background-color: #2c2c2c;
-            color: #ebebeb;
-            border: none;
-            border-right: 1px solid #454545;
-            border-bottom: 1px solid #454545;
-            padding: 6px;
-        }
-        QTableWidget { gridline-color: #3b3b3b; }
-        QScrollBar:vertical {
-            background: #202020;
-            width: 13px;
-            margin: 0;
-        }
-        QScrollBar::handle:vertical {
-            background: #505050;
-            min-height: 28px;
-            border-radius: 5px;
-        }
-        QScrollBar::handle:vertical:hover { background: #626262; }
-        QScrollBar:horizontal {
-            background: #202020;
-            height: 13px;
-            margin: 0;
-        }
-        QScrollBar::handle:horizontal {
-            background: #505050;
-            min-width: 28px;
-            border-radius: 5px;
-        }
-        QScrollBar::handle:horizontal:hover { background: #626262; }
-        QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
-        QSplitter::handle { background-color: #383838; }
-        QSplitter::handle:hover { background-color: #505050; }
-        QToolTip {
-            background-color: #2d2d2d;
-            color: #ffffff;
-            border: 1px solid #5a5a5a;
-            padding: 4px;
-        }
-        QComboBox QAbstractItemView {
-            background-color: #202020;
-            color: #ebebeb;
-            selection-background-color: #3469a5;
-        }
-        QCheckBox { spacing: 6px; }
-        QLabel { background: transparent; }
-        """
-    )
+def apply_dark_theme(app: QApplication) -> None:
+    apply_theme(app)
 
 
 def create_splash_pixmap() -> QPixmap:

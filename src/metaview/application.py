@@ -82,7 +82,7 @@ from PySide6.QtWidgets import (
 
 from .constants import asset_path
 from .main_window import MainWindow
-from .theme import apply_dark_theme, create_splash_pixmap
+from .theme import apply_theme, create_splash_pixmap
 
 def main() -> int:
     app = QApplication(sys.argv)
@@ -94,7 +94,7 @@ def main() -> int:
         application_icon = QIcon(str(asset_path("metaview.png")))
     app.setWindowIcon(application_icon)
 
-    apply_dark_theme(app)
+    apply_theme(app)
 
     splash = QSplashScreen(
         create_splash_pixmap(),

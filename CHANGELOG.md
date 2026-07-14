@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 - Unreleased
+
+- Added Experiment Notebook foundations and UI integration.
+- Added integrated zoomable, pannable Preview with fullscreen navigation and overlay toolbar.
+- Added application-wide selectable themes: Catppuccin Mocha, Gruvbox Dark, Tokyo Night, Dracula, Catppuccin Latte, and Gruvbox Light.
+- Restored thumbnail double-click opening and added richer context-menu actions.
+- Added cached thumbnail metadata tooltips.
+
 
 ## Unreleased
 
