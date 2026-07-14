@@ -1,3 +1,11 @@
+
+### Usability pass
+
+- Double-click thumbnails to open integrated Preview.
+- Added full File/Edit/Image/Experiment/View/Help menu bar.
+- Added direct Experiment Notebook access and existing-experiment browser.
+- Fixed Preview toolbar anchoring and top-edge reveal.
+- Enabled smooth Preview scaling while zooming.
 # Changelog
 
 ## 0.3.0 - Unreleased

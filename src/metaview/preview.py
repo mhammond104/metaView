@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QKeyEvent,
     QKeySequence,
     QMouseEvent,
+    QPainter,
     QPixmap,
     QResizeEvent,
     QWheelEvent,
@@ -40,12 +41,14 @@ class ImageView(QGraphicsView):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self._pixmap_item = QGraphicsPixmapItem()
+        self._pixmap_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self._scene.addItem(self._pixmap_item)
         self.setScene(self._scene)
 
         self._fit_mode = True
         self._native_scale = 1.0
         self.setBackgroundBrush(Qt.GlobalColor.black)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self.setFrameStyle(0)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -154,7 +157,7 @@ class PreviewWindow(QMainWindow):
         self._was_maximized = False
         self.settings = QSettings("Martin Hammond", "ComfyUI Image Browser")
         self._toolbar_windowed_visible = self.settings.value("preview/toolbar_visible", True, type=bool)
-        self._fullscreen_toolbar_pinned: bool | None = None
+        self._toolbar_user_hidden = False
         self._toolbar_hovered = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -261,7 +264,7 @@ class PreviewWindow(QMainWindow):
         self.addAction(self.close_action)
 
     def _create_toolbar_overlay(self) -> None:
-        self.toolbar_overlay = QFrame(self.view.viewport())
+        self.toolbar_overlay = QFrame(self)
         self.toolbar_overlay.setObjectName("previewToolbarOverlay")
         layout = QHBoxLayout(self.toolbar_overlay)
         layout.setContentsMargins(6, 4, 6, 4)
@@ -305,20 +308,21 @@ class PreviewWindow(QMainWindow):
         if not hasattr(self, "toolbar_overlay"):
             return
         self.toolbar_overlay.adjustSize()
-        viewport_width = self.view.viewport().width()
-        x = max(8, (viewport_width - self.toolbar_overlay.width()) // 2)
-        self.toolbar_overlay.move(x, 12)
+        viewport_rect = self.view.viewport().rect()
+        top_left = self.view.viewport().mapTo(self, viewport_rect.topLeft())
+        x = max(8, top_left.x() + (viewport_rect.width() - self.toolbar_overlay.width()) // 2)
+        self.toolbar_overlay.move(x, top_left.y() + 12)
         self.toolbar_overlay.raise_()
 
     def toggle_toolbar(self) -> None:
-        if self.isFullScreen():
-            visible = not self.toolbar_overlay.isVisible()
-            self._fullscreen_toolbar_pinned = visible
-            self._set_toolbar_visible(visible)
-            return
-
-        self._toolbar_windowed_visible = not self.toolbar_overlay.isVisible()
-        self._set_toolbar_visible(self._toolbar_windowed_visible)
+        """Toggle the toolbar; top-edge movement can always reveal it again."""
+        if self.toolbar_overlay.isVisible():
+            self._toolbar_user_hidden = True
+            self._set_toolbar_visible(False)
+        else:
+            self._toolbar_user_hidden = False
+            self._set_toolbar_visible(True)
+            self._schedule_toolbar_hide()
 
     def _set_toolbar_visible(self, visible: bool) -> None:
         self._toolbar_hide_timer.stop()
@@ -327,19 +331,11 @@ class PreviewWindow(QMainWindow):
             self._position_toolbar()
 
     def _schedule_toolbar_hide(self) -> None:
-        if (
-            self.isFullScreen()
-            and self._fullscreen_toolbar_pinned is None
-            and not self._toolbar_hovered
-        ):
+        if self.isFullScreen() and not self._toolbar_hovered:
             self._toolbar_hide_timer.start()
 
     def _auto_hide_toolbar(self) -> None:
-        if (
-            self.isFullScreen()
-            and self._fullscreen_toolbar_pinned is None
-            and not self._toolbar_hovered
-        ):
+        if self.isFullScreen() and not self._toolbar_hovered:
             self.toolbar_overlay.hide()
 
     def eventFilter(self, watched, event: QEvent) -> bool:
@@ -351,15 +347,16 @@ class PreviewWindow(QMainWindow):
                 self._toolbar_hovered = False
                 self._schedule_toolbar_hide()
 
-        if event.type() == QEvent.Type.MouseMove and self.isFullScreen():
-            if self._fullscreen_toolbar_pinned is None:
-                position = event.position()
-                if watched is not self.view.viewport():
-                    position = self.view.viewport().mapFromGlobal(
-                        watched.mapToGlobal(position.toPoint())
-                    )
-                if position.y() <= 72:
-                    self._set_toolbar_visible(True)
+        if event.type() == QEvent.Type.MouseMove:
+            position = event.position()
+            if watched is not self.view.viewport():
+                position = self.view.viewport().mapFromGlobal(
+                    watched.mapToGlobal(position.toPoint())
+                )
+            if position.y() <= 72:
+                self._toolbar_user_hidden = False
+                self._set_toolbar_visible(True)
+            elif self.isFullScreen():
                 self._schedule_toolbar_hide()
 
         return super().eventFilter(watched, event)
@@ -415,13 +412,13 @@ class PreviewWindow(QMainWindow):
             if self._was_maximized:
                 self.showMaximized()
             self.statusBar().show()
-            self._fullscreen_toolbar_pinned = None
+            self._toolbar_user_hidden = False
             self._set_toolbar_visible(self._toolbar_windowed_visible)
             return
 
         self._was_maximized = self.isMaximized()
         self.statusBar().hide()
-        self._fullscreen_toolbar_pinned = None
+        self._toolbar_user_hidden = False
         self.showFullScreen()
         self._set_toolbar_visible(True)
         self._schedule_toolbar_hide()

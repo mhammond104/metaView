@@ -46,47 +46,270 @@ def current_theme_key() -> str:
 def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     theme = THEMES.get(key or current_theme_key(), THEMES[DEFAULT_THEME])
     app.setStyle("Fusion")
+
+    font = app.font()
+    if font.pointSizeF() < 10:
+        font.setPointSizeF(10)
+    app.setFont(font)
+
     p = QPalette()
     for role, colour in (
-        (QPalette.ColorRole.Window, theme.window), (QPalette.ColorRole.WindowText, theme.text),
-        (QPalette.ColorRole.Base, theme.base), (QPalette.ColorRole.AlternateBase, theme.alternate),
-        (QPalette.ColorRole.ToolTipBase, theme.surface), (QPalette.ColorRole.ToolTipText, theme.text),
-        (QPalette.ColorRole.Text, theme.text), (QPalette.ColorRole.Button, theme.surface),
-        (QPalette.ColorRole.ButtonText, theme.text), (QPalette.ColorRole.BrightText, theme.danger),
-        (QPalette.ColorRole.Link, theme.accent), (QPalette.ColorRole.Highlight, theme.accent),
-        (QPalette.ColorRole.HighlightedText, theme.accent_text), (QPalette.ColorRole.PlaceholderText, theme.muted),
+        (QPalette.ColorRole.Window, theme.window),
+        (QPalette.ColorRole.WindowText, theme.text),
+        (QPalette.ColorRole.Base, theme.base),
+        (QPalette.ColorRole.AlternateBase, theme.alternate),
+        (QPalette.ColorRole.ToolTipBase, theme.surface),
+        (QPalette.ColorRole.ToolTipText, theme.text),
+        (QPalette.ColorRole.Text, theme.text),
+        (QPalette.ColorRole.Button, theme.surface),
+        (QPalette.ColorRole.ButtonText, theme.text),
+        (QPalette.ColorRole.BrightText, theme.danger),
+        (QPalette.ColorRole.Link, theme.accent),
+        (QPalette.ColorRole.Highlight, theme.accent),
+        (QPalette.ColorRole.HighlightedText, theme.accent_text),
+        (QPalette.ColorRole.PlaceholderText, theme.muted),
     ):
         p.setColor(role, QColor(colour))
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(theme.muted))
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(theme.muted))
     app.setPalette(p)
+
     app.setStyleSheet(f"""
-    QMainWindow, QDialog, QWidget {{ background-color:{theme.window}; color:{theme.text}; }}
-    QToolBar, QStatusBar, QMenuBar, QMenu {{ background-color:{theme.alternate}; border:none; }}
-    QToolBar {{ spacing:6px; padding:4px; border-bottom:1px solid {theme.border}; }}
-    QLineEdit,QPlainTextEdit,QTextEdit,QTreeView,QListWidget,QTableWidget,QComboBox {{ background:{theme.base}; color:{theme.text}; border:1px solid {theme.border}; border-radius:4px; selection-background-color:{theme.accent}; selection-color:{theme.accent_text}; }}
-    QLineEdit,QComboBox {{ padding:5px 7px; min-height:22px; }}
-    QTreeView::item,QListWidget::item {{ padding:3px; }}
-    QTreeView::item:selected,QListWidget::item:selected {{ background:{theme.accent}; color:{theme.accent_text}; }}
-    QPushButton,QToolButton {{ background:{theme.surface}; color:{theme.text}; border:1px solid {theme.border}; border-radius:4px; padding:5px 9px; }}
-    QPushButton:hover,QToolButton:hover {{ background:{theme.surface_hover}; }}
-    QPushButton:pressed,QToolButton:pressed,QToolButton:checked {{ background:{theme.accent}; color:{theme.accent_text}; }}
-    QPushButton:disabled,QToolButton:disabled {{ color:{theme.muted}; }}
-    QTabWidget::pane {{ border:1px solid {theme.border}; }}
-    QTabBar::tab {{ background:{theme.alternate}; color:{theme.muted}; border:1px solid {theme.border}; padding:7px 12px; }}
-    QTabBar::tab:selected {{ background:{theme.window}; color:{theme.text}; }}
-    QHeaderView::section {{ background:{theme.surface}; color:{theme.text}; border:0; border-right:1px solid {theme.border}; border-bottom:1px solid {theme.border}; padding:6px; }}
-    QTableWidget {{ gridline-color:{theme.border}; }}
-    QScrollBar:vertical {{ background:{theme.alternate}; width:13px; }} QScrollBar:horizontal {{ background:{theme.alternate}; height:13px; }}
-    QScrollBar::handle {{ background:{theme.border}; min-height:28px; min-width:28px; border-radius:5px; }} QScrollBar::handle:hover {{ background:{theme.surface_hover}; }}
-    QScrollBar::add-line,QScrollBar::sub-line {{ width:0; height:0; }}
-    QSplitter::handle {{ background:{theme.border}; }} QSplitter::handle:hover {{ background:{theme.surface_hover}; }}
-    QToolTip {{ background:{theme.surface}; color:{theme.text}; border:1px solid {theme.border}; padding:4px; }}
-    QComboBox QAbstractItemView {{ background:{theme.base}; color:{theme.text}; selection-background-color:{theme.accent}; }}
-    QLabel {{ background:transparent; }}
-    QFrame#previewToolbarOverlay {{ background-color:{theme.alternate}; border:1px solid {theme.border}; border-radius:9px; }}
-    QFrame#previewToolbarOverlay QToolButton {{ background:transparent; border:0; }}
-    QFrame#previewToolbarOverlay QToolButton:hover {{ background:{theme.surface_hover}; }}
+    * {{ outline: none; }}
+    QMainWindow, QDialog, QWidget {{
+        background-color: {theme.window};
+        color: {theme.text};
+    }}
+
+    QMenuBar {{
+        background: {theme.alternate};
+        border-bottom: 1px solid {theme.border};
+        padding: 3px 8px;
+        spacing: 3px;
+    }}
+    QMenuBar::item {{
+        background: transparent;
+        border-radius: 5px;
+        padding: 6px 10px;
+    }}
+    QMenuBar::item:selected, QMenuBar::item:pressed {{
+        background: {theme.surface};
+        color: {theme.text};
+    }}
+    QMenu {{
+        background: {theme.alternate};
+        border: 1px solid {theme.border};
+        border-radius: 8px;
+        padding: 6px;
+    }}
+    QMenu::item {{
+        border-radius: 5px;
+        padding: 7px 30px 7px 28px;
+        margin: 1px 0;
+    }}
+    QMenu::item:selected {{
+        background: {theme.accent};
+        color: {theme.accent_text};
+    }}
+    QMenu::item:disabled {{ color: {theme.muted}; }}
+    QMenu::separator {{
+        height: 1px;
+        background: {theme.border};
+        margin: 6px 9px;
+    }}
+    QMenu::indicator {{ left: 8px; width: 14px; height: 14px; }}
+
+    QToolBar#mainToolbar {{
+        background: {theme.alternate};
+        border: 0;
+        border-bottom: 1px solid {theme.border};
+        spacing: 5px;
+        padding: 7px 9px;
+    }}
+    QToolBar#mainToolbar QToolButton {{
+        background: transparent;
+        border: 0;
+        border-radius: 6px;
+        padding: 7px 11px;
+    }}
+    QToolBar#mainToolbar QToolButton:hover {{ background: {theme.surface}; }}
+    QToolBar#mainToolbar QToolButton:pressed {{
+        background: {theme.accent};
+        color: {theme.accent_text};
+    }}
+
+    QStatusBar {{
+        background: {theme.alternate};
+        color: {theme.muted};
+        border-top: 1px solid {theme.border};
+        padding: 2px 8px;
+    }}
+    QStatusBar::item {{ border: 0; }}
+
+    QLineEdit, QPlainTextEdit, QTextEdit, QTreeView, QListWidget,
+    QTableWidget, QComboBox, QSpinBox, QDoubleSpinBox {{
+        background: {theme.base};
+        color: {theme.text};
+        border: 1px solid {theme.border};
+        border-radius: 6px;
+        selection-background-color: {theme.accent};
+        selection-color: {theme.accent_text};
+    }}
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+        padding: 6px 9px;
+        min-height: 24px;
+    }}
+    QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+    QTreeView:focus, QListWidget:focus, QTableWidget:focus, QComboBox:focus {{
+        border: 1px solid {theme.accent};
+    }}
+    QComboBox::drop-down {{ border: 0; width: 24px; }}
+    QComboBox QAbstractItemView {{
+        background: {theme.alternate};
+        color: {theme.text};
+        border: 1px solid {theme.border};
+        selection-background-color: {theme.accent};
+        padding: 4px;
+    }}
+
+    QTreeView, QListWidget, QTableWidget {{ padding: 3px; }}
+    QTreeView::item, QListWidget::item {{
+        border-radius: 5px;
+        padding: 4px;
+        margin: 1px;
+    }}
+    QTreeView::item:hover, QListWidget::item:hover {{ background: {theme.surface}; }}
+    QTreeView::item:selected, QListWidget::item:selected {{
+        background: {theme.accent};
+        color: {theme.accent_text};
+    }}
+
+    QPushButton, QToolButton {{
+        background: {theme.surface};
+        color: {theme.text};
+        border: 1px solid {theme.border};
+        border-radius: 6px;
+        padding: 6px 11px;
+        min-height: 22px;
+    }}
+    QPushButton:hover, QToolButton:hover {{
+        background: {theme.surface_hover};
+        border-color: {theme.accent};
+    }}
+    QPushButton:pressed, QToolButton:pressed, QToolButton:checked {{
+        background: {theme.accent};
+        color: {theme.accent_text};
+        border-color: {theme.accent};
+    }}
+    QPushButton:disabled, QToolButton:disabled {{
+        color: {theme.muted};
+        background: {theme.alternate};
+    }}
+    QPushButton#primaryAction {{
+        background: {theme.accent};
+        color: {theme.accent_text};
+        border-color: {theme.accent};
+        font-weight: 600;
+    }}
+    QPushButton#primaryAction:hover {{ background: {theme.surface_hover}; color: {theme.text}; }}
+
+    QFrame#mainActionStrip {{
+        background: {theme.alternate};
+        border-top: 1px solid {theme.border};
+    }}
+    QFrame#promptViewBar {{
+        background: {theme.surface};
+        border: 1px solid {theme.border};
+        border-radius: 7px;
+    }}
+    QLabel#mainImagePreview {{
+        background: {theme.base};
+        border: 1px solid {theme.border};
+        border-radius: 7px;
+        color: {theme.muted};
+    }}
+
+    QTabWidget::pane {{
+        border: 1px solid {theme.border};
+        border-radius: 7px;
+        top: -1px;
+    }}
+    QTabBar::tab {{
+        background: transparent;
+        color: {theme.muted};
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 8px 13px;
+        margin-right: 2px;
+    }}
+    QTabBar::tab:hover {{ color: {theme.text}; background: {theme.surface}; }}
+    QTabBar::tab:selected {{
+        color: {theme.text};
+        border-bottom-color: {theme.accent};
+        font-weight: 600;
+    }}
+
+    QHeaderView::section {{
+        background: {theme.surface};
+        color: {theme.text};
+        border: 0;
+        border-right: 1px solid {theme.border};
+        border-bottom: 1px solid {theme.border};
+        padding: 7px;
+        font-weight: 600;
+    }}
+    QTableWidget {{ gridline-color: {theme.border}; }}
+
+    QScrollBar:vertical {{ background: transparent; width: 11px; margin: 2px; }}
+    QScrollBar:horizontal {{ background: transparent; height: 11px; margin: 2px; }}
+    QScrollBar::handle {{
+        background: {theme.border};
+        min-height: 30px;
+        min-width: 30px;
+        border-radius: 5px;
+    }}
+    QScrollBar::handle:hover {{ background: {theme.surface_hover}; }}
+    QScrollBar::add-line, QScrollBar::sub-line,
+    QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; width: 0; height: 0; }}
+
+    QSplitter::handle {{ background: {theme.border}; }}
+    QSplitter::handle:hover {{ background: {theme.accent}; }}
+    QSplitter::handle:horizontal {{ width: 2px; }}
+    QSplitter::handle:vertical {{ height: 2px; }}
+
+    QGroupBox {{
+        border: 1px solid {theme.border};
+        border-radius: 7px;
+        margin-top: 10px;
+        padding-top: 8px;
+        font-weight: 600;
+    }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; }}
+
+    QCheckBox, QRadioButton {{ spacing: 7px; }}
+    QCheckBox::indicator, QRadioButton::indicator {{ width: 15px; height: 15px; }}
+
+    QToolTip {{
+        background: {theme.surface};
+        color: {theme.text};
+        border: 1px solid {theme.border};
+        border-radius: 5px;
+        padding: 6px 8px;
+    }}
+    QLabel {{ background: transparent; }}
+
+    QFrame#previewToolbarOverlay {{
+        background-color: {theme.alternate};
+        border: 1px solid {theme.border};
+        border-radius: 10px;
+    }}
+    QFrame#previewToolbarOverlay QToolButton {{
+        background: transparent;
+        border: 0;
+        border-radius: 6px;
+        padding: 6px 9px;
+    }}
+    QFrame#previewToolbarOverlay QToolButton:hover {{ background: {theme.surface_hover}; }}
     """)
     return theme
 
