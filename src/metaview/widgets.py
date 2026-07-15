@@ -547,3 +547,43 @@ class CollectionListWidget(QListWidget):
             return
         self.imagesDropped.emit(collection_id, paths)
         event.acceptProposedAction()
+
+
+class TagListWidget(QListWidget):
+    """Tag sidebar accepting image-file drops from the thumbnail view."""
+
+    imagesDropped = Signal(int, object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self.itemAt(event.position().toPoint()) is not None and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
+        if item is None:
+            event.ignore()
+            return
+        tag_id = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(tag_id, int):
+            event.ignore()
+            return
+        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        if not paths:
+            event.ignore()
+            return
+        self.imagesDropped.emit(tag_id, paths)
+        event.acceptProposedAction()

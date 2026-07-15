@@ -40,6 +40,7 @@ from PySide6.QtGui import (
     QIcon,
     QImage,
     QImageReader,
+    QKeySequence,
     QPixmap,
     QPalette,
     QPainter,
@@ -97,7 +98,7 @@ from .metadata import (
     display_json, extract_summary, read_image_metadata,
     model_display_name, thumbnail_cache_path,
 )
-from .widgets import CollectionListWidget, ImageDragListWidget, MetadataPanel
+from .widgets import CollectionListWidget, ImageDragListWidget, MetadataPanel, TagListWidget
 from .prompt_library import (
     ImageIndexService,
     Prompt,
@@ -113,6 +114,12 @@ from .preview import PreviewWindow
 from .theme import THEMES, apply_theme, current_theme_key
 from .experiments import ExperimentService, SQLiteExperimentRepository, AnalysedImage, analyse_images
 from .collections import Collection, CollectionRepository
+from .smart_collections import SmartCollectionRepository, evaluate_indexed_smart_collection
+from .smart_collection_ui import SmartCollectionDialog
+from .tags import TagRepository
+from .tag_ui import ManageTagsDialog
+from .library_folders import LibraryFolderRepository
+from .library_folder_ui import ManageLibraryFoldersDialog
 from .experiments.ui import (
     CreateExperimentDialog,
     ExperimentNotebookDialog,
@@ -204,7 +211,12 @@ class MainWindow(QMainWindow):
             SQLiteExperimentRepository(experiment_database_path())
         )
         self.collection_repository = CollectionRepository(collection_database_path())
+        self.smart_collection_repository = SmartCollectionRepository(collection_database_path())
+        self.tag_repository = TagRepository(collection_database_path())
+        self.library_folder_repository = LibraryFolderRepository(collection_database_path())
         self.active_collection_id: int | None = None
+        self.active_smart_collection_id: int | None = None
+        self.active_tag_id: int | None = None
         self.prompt_library = PromptLibraryController(
             self.prompt_repository,
             self.image_index,
@@ -216,6 +228,11 @@ class MainWindow(QMainWindow):
         self.ratings_database = ImageRatingsDatabase()
         self.active_rating_filter = "all"
         self.preview_window: PreviewWindow | None = None
+        self.compare_reference_path: Path | None = None
+        self.index_scan_total = 0
+        self.index_scan_completed = 0
+        self.index_scan_generation = 0
+        self.index_scan_persist = False
 
         self.file_watcher = QFileSystemWatcher(self)
         self.file_watcher.directoryChanged.connect(self.directory_contents_changed)
@@ -239,6 +256,9 @@ class MainWindow(QMainWindow):
         self.create_layout()
         self.create_toolbar()
         self.create_menus()
+        self.index_status_label = QLabel("Index: ready")
+        self.index_status_label.setObjectName("indexStatusLabel")
+        self.statusBar().addPermanentWidget(self.index_status_label)
         self.restore_settings()
         self.statusBar().showMessage("Ready")
 
@@ -265,6 +285,7 @@ class MainWindow(QMainWindow):
         self.image_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.image_list.currentItemChanged.connect(self.image_selected)
         self.image_list.itemDoubleClicked.connect(self.preview_thumbnail_from_item)
+        self.image_list.itemClicked.connect(self.thumbnail_clicked)
         self.image_list.itemSelectionChanged.connect(self.thumbnail_selection_changed)
         self.image_list.verticalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
         self.image_list.horizontalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
@@ -402,13 +423,78 @@ class MainWindow(QMainWindow):
         navigation_layout = QVBoxLayout(navigation_panel)
         navigation_layout.setContentsMargins(0, 0, 0, 0)
         navigation_layout.setSpacing(3)
-        folders_label = QLabel("Folders")
+
+        library_header = QFrame()
+        library_header.setObjectName("collectionHeader")
+        library_header_layout = QHBoxLayout(library_header)
+        library_header_layout.setContentsMargins(4, 2, 4, 2)
+        library_header_layout.addWidget(QLabel("Library"), 1)
+        manage_library_button = QToolButton()
+        manage_library_button.setText("…")
+        manage_library_button.setToolTip("Manage library folders")
+        manage_library_button.clicked.connect(self.manage_library_folders)
+        library_header_layout.addWidget(manage_library_button)
+        navigation_layout.addWidget(library_header)
+
+        self.library_folder_list = QListWidget()
+        self.library_folder_list.setObjectName("libraryFolderList")
+        self.library_folder_list.setMaximumHeight(180)
+        self.library_folder_list.itemClicked.connect(self.library_folder_activated)
+        navigation_layout.addWidget(self.library_folder_list)
+
+        folders_label = QLabel("Browse Folders")
         folders_label.setObjectName("sectionLabel")
         navigation_layout.addWidget(folders_label)
         navigation_layout.addWidget(self.directory_tree, 1)
         navigation_layout.addWidget(collection_header)
         navigation_layout.addWidget(self.collection_list)
+
+        self.smart_collection_list = QListWidget()
+        self.smart_collection_list.setObjectName("smartCollectionList")
+        self.smart_collection_list.setMaximumHeight(180)
+        self.smart_collection_list.itemClicked.connect(self.smart_collection_activated)
+        self.smart_collection_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.smart_collection_list.customContextMenuRequested.connect(self.show_smart_collection_context_menu)
+
+        smart_header = QFrame()
+        smart_header.setObjectName("collectionHeader")
+        smart_header_layout = QHBoxLayout(smart_header)
+        smart_header_layout.setContentsMargins(4, 2, 4, 2)
+        smart_header_layout.addWidget(QLabel("Smart Collections"), 1)
+        new_smart_button = QToolButton()
+        new_smart_button.setText("+")
+        new_smart_button.setToolTip("Create smart collection")
+        new_smart_button.clicked.connect(self.create_smart_collection)
+        smart_header_layout.addWidget(new_smart_button)
+
+        navigation_layout.addWidget(smart_header)
+        navigation_layout.addWidget(self.smart_collection_list)
+
+        self.tag_list = TagListWidget()
+        self.tag_list.setObjectName("tagList")
+        self.tag_list.setMaximumHeight(180)
+        self.tag_list.itemClicked.connect(self.tag_activated)
+        self.tag_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tag_list.customContextMenuRequested.connect(self.show_tag_context_menu)
+        self.tag_list.imagesDropped.connect(self.add_dropped_images_to_tag)
+
+        tag_header = QFrame()
+        tag_header.setObjectName("collectionHeader")
+        tag_header_layout = QHBoxLayout(tag_header)
+        tag_header_layout.setContentsMargins(4, 2, 4, 2)
+        tag_header_layout.addWidget(QLabel("Tags"), 1)
+        new_tag_button = QToolButton()
+        new_tag_button.setText("+")
+        new_tag_button.setToolTip("Create tag")
+        new_tag_button.clicked.connect(self.create_tag)
+        tag_header_layout.addWidget(new_tag_button)
+        navigation_layout.addWidget(tag_header)
+        navigation_layout.addWidget(self.tag_list)
+
+        self.refresh_library_folders()
         self.refresh_collections()
+        self.refresh_smart_collections()
+        self.refresh_tags()
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(navigation_panel)
@@ -493,20 +579,66 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        self.open_folder_action = QAction("Open Folder…", self)
+        self.open_folder_action = QAction("Browse Folder…", self)
         self.open_folder_action.setShortcut("Ctrl+O")
+        self.open_folder_action.setStatusTip("Browse a folder without adding it to the managed library")
         self.open_folder_action.triggered.connect(self.choose_directory)
         toolbar.addAction(self.open_folder_action)
 
+        self.add_folder_to_library_action = QAction("Add Folder to Library…", self)
+        self.add_folder_to_library_action.setShortcut("Ctrl+Alt+O")
+        self.add_folder_to_library_action.setStatusTip("Register and index a folder in the managed library")
+        self.add_folder_to_library_action.triggered.connect(self.add_folder_to_library)
+        toolbar.addAction(self.add_folder_to_library_action)
+
         self.refresh_action = QAction("Refresh", self)
         self.refresh_action.setShortcut("F5")
+        self.refresh_action.setStatusTip("Refresh the current view")
         self.refresh_action.triggered.connect(self.refresh_directory)
         toolbar.addAction(self.refresh_action)
 
+        self.focus_search_action = QAction("Focus Search", self)
+        self.focus_search_action.setShortcut("Ctrl+F")
+        self.focus_search_action.triggered.connect(self.focus_filename_search)
+        self.addAction(self.focus_search_action)
+
+        self.rename_current_action = QAction("Rename Current Item…", self)
+        self.rename_current_action.setShortcut("F2")
+        self.rename_current_action.triggered.connect(self.rename_current_sidebar_item)
+        self.addAction(self.rename_current_action)
+
         self.preview_action = QAction("Preview", self)
-        self.preview_action.setShortcut("Space")
+        self.preview_action.setShortcuts([QKeySequence("Space"), QKeySequence("Return")])
+        self.preview_action.setStatusTip("Preview the selected image")
         self.preview_action.triggered.connect(self.preview_selected_image)
         self.addAction(self.preview_action)
+
+        self.open_image_action = QAction("Open in System Viewer", self)
+        self.open_image_action.setShortcut("Ctrl+Return")
+        self.open_image_action.setStatusTip("Open the selected image in the operating system viewer")
+        self.open_image_action.triggered.connect(self.open_selected_image)
+        self.addAction(self.open_image_action)
+
+        self.compare_action = QAction("Compare Selected Images…", self)
+        self.compare_action.setShortcut("Ctrl+M")
+        self.compare_action.setStatusTip("Compare exactly two selected images")
+        self.compare_action.triggered.connect(self.compare_selected_images)
+        self.addAction(self.compare_action)
+
+        self.add_to_collection_action = QAction("Add Selection to Collection…", self)
+        self.add_to_collection_action.setShortcut("Ctrl+Alt+C")
+        self.add_to_collection_action.triggered.connect(self.add_selection_to_collection_dialog)
+        self.addAction(self.add_to_collection_action)
+
+        self.manage_tags_action = QAction("Manage Tags…", self)
+        self.manage_tags_action.setShortcut("Ctrl+T")
+        self.manage_tags_action.triggered.connect(self.manage_selected_tags)
+        self.addAction(self.manage_tags_action)
+
+        self.add_to_experiment_action = QAction("Add Selection to Experiment…", self)
+        self.add_to_experiment_action.setShortcut("Ctrl+Alt+E")
+        self.add_to_experiment_action.triggered.connect(self.add_selection_to_experiment)
+        self.addAction(self.add_to_experiment_action)
 
         self.prompt_library_action = QAction("Prompt Library", self)
         self.prompt_library_action.setShortcut("Ctrl+L")
@@ -539,15 +671,11 @@ class MainWindow(QMainWindow):
 
         file_menu = menu_bar.addMenu("&File")
         file_menu.addAction(self.open_folder_action)
+        file_menu.addAction(self.add_folder_to_library_action)
+        manage_library_action = QAction("Manage Library Folders…", self)
+        manage_library_action.triggered.connect(self.manage_library_folders)
+        file_menu.addAction(manage_library_action)
         file_menu.addAction(self.refresh_action)
-        file_menu.addSeparator()
-        file_menu.addAction(self.prompt_library_action)
-        file_menu.addAction(self.experiment_notebook_action)
-        file_menu.addSeparator()
-        new_collection_action = QAction("New &Collection…", self)
-        new_collection_action.setShortcut("Ctrl+Shift+N")
-        new_collection_action.triggered.connect(self.create_collection)
-        file_menu.addAction(new_collection_action)
         file_menu.addSeparator()
         exit_action = QAction("E&xit metaView", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -558,20 +686,20 @@ class MainWindow(QMainWindow):
         edit_menu = menu_bar.addMenu("&Edit")
         copy_path_action = QAction("Copy Image &Path", self)
         copy_path_action.setShortcut("Ctrl+Shift+C")
-        copy_path_action.setStatusTip("Copy the selected image path to the clipboard")
         copy_path_action.triggered.connect(self.copy_selected_image_path)
         edit_menu.addAction(copy_path_action)
-
         copy_prompt_action = QAction("Copy &Positive Prompt", self)
         copy_prompt_action.setShortcut("Ctrl+Shift+P")
         copy_prompt_action.triggered.connect(self.copy_selected_positive_prompt)
         edit_menu.addAction(copy_prompt_action)
-
         copy_negative_action = QAction("Copy &Negative Prompt", self)
-        copy_negative_action.setShortcut("Ctrl+Shift+N")
+        copy_negative_action.setShortcut("Ctrl+Alt+P")
         copy_negative_action.triggered.connect(self.copy_selected_negative_prompt)
         edit_menu.addAction(copy_negative_action)
-
+        copy_metadata_action = QAction("Copy Metadata as &JSON", self)
+        copy_metadata_action.setShortcut("Ctrl+Alt+J")
+        copy_metadata_action.triggered.connect(self.copy_selected_metadata_json)
+        edit_menu.addAction(copy_metadata_action)
         edit_menu.addSeparator()
         rating_menu = edit_menu.addMenu("Set &Rating")
         for rating in range(1, 6):
@@ -584,59 +712,47 @@ class MainWindow(QMainWindow):
 
         image_menu = menu_bar.addMenu("&Image")
         image_menu.addAction(self.preview_action)
-        open_image_action = QAction("Open in System &Viewer", self)
-        open_image_action.setShortcut("Ctrl+Return")
-        open_image_action.setStatusTip("Open the selected image in the operating system viewer")
-        open_image_action.triggered.connect(self.open_selected_image)
-        image_menu.addAction(open_image_action)
-
+        image_menu.addAction(self.open_image_action)
         reveal_action = QAction(self.file_manager_action_label(), self)
-        reveal_action.setStatusTip("Reveal the selected image in the file manager")
         reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
         image_menu.addAction(reveal_action)
-
         image_menu.addSeparator()
+        image_menu.addAction(self.compare_action)
+        compare_with_action = QAction("Compare &With…", self)
+        compare_with_action.setShortcut("Ctrl+Alt+M")
+        compare_with_action.triggered.connect(self.start_compare_with_selected)
+        image_menu.addAction(compare_with_action)
         similar_action = QAction("Find &Similar…", self)
         similar_action.setShortcut("Ctrl+Shift+F")
         similar_action.triggered.connect(self.find_similar_images)
         image_menu.addAction(similar_action)
-
+        image_menu.addSeparator()
+        image_menu.addAction(self.manage_tags_action)
+        image_menu.addAction(self.add_to_collection_action)
         image_menu.addSeparator()
         trash_action = QAction("Move to &Trash…", self)
         trash_action.setShortcut("Delete")
         trash_action.triggered.connect(self.move_selected_image_to_trash)
         image_menu.addAction(trash_action)
 
-        self.collection_menu = menu_bar.addMenu("&Collection")
+        self.collection_menu = menu_bar.addMenu("&Library")
         self.collection_menu.aboutToShow.connect(self.populate_collection_menu)
 
-        experiment_menu = menu_bar.addMenu("E&xperiment")
-        experiment_menu.addAction(self.experiment_notebook_action)
-        experiment_menu.addSeparator()
-
-        compare_action = QAction("&Compare Selected Images…", self)
-        compare_action.setShortcut("Ctrl+Shift+M")
-        compare_action.triggered.connect(self.compare_selected_images)
-        experiment_menu.addAction(compare_action)
-
+        research_menu = menu_bar.addMenu("&Research")
+        research_menu.addAction(self.experiment_notebook_action)
+        research_menu.addSeparator()
         experiment_view_action = QAction("Open Experiment &View", self)
         experiment_view_action.triggered.connect(self.open_experiment_view)
-        experiment_menu.addAction(experiment_view_action)
-
-        experiment_menu.addSeparator()
+        research_menu.addAction(experiment_view_action)
         create_action = QAction("Create &New Experiment…", self)
         create_action.setShortcut("Ctrl+Shift+E")
         create_action.triggered.connect(self.create_experiment_from_selection)
-        experiment_menu.addAction(create_action)
-
-        add_action = QAction("&Add Selection to Experiment…", self)
-        add_action.triggered.connect(self.add_selection_to_experiment)
-        experiment_menu.addAction(add_action)
+        research_menu.addAction(create_action)
+        research_menu.addAction(self.add_to_experiment_action)
 
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.refresh_action)
         view_menu.addSeparator()
-
         theme_menu = view_menu.addMenu("&Theme")
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
@@ -670,6 +786,13 @@ class MainWindow(QMainWindow):
         new_action = self.collection_menu.addAction("New Collection…")
         new_action.setShortcut("Ctrl+Shift+N")
         new_action.triggered.connect(self.create_collection)
+        new_smart_action = self.collection_menu.addAction("New Smart Collection…")
+        new_smart_action.triggered.connect(self.create_smart_collection)
+        manage_tags = self.collection_menu.addAction("Manage Tags…")
+        manage_tags.triggered.connect(self.manage_selected_tags)
+        manage_library = self.collection_menu.addAction("Manage Library Folders…")
+        manage_library.triggered.connect(self.manage_library_folders)
+        self.collection_menu.addSeparator()
 
         add_menu = self.collection_menu.addMenu("Add Selection to Collection")
         selected = bool(self.selected_image_paths())
@@ -704,6 +827,25 @@ class MainWindow(QMainWindow):
             if collection is not None:
                 rename_action.setStatusTip(f'Rename "{collection.name}"')
                 delete_action.setStatusTip(f'Delete "{collection.name}" without deleting its images')
+        elif self.active_smart_collection_id is not None:
+            collection = self.smart_collection_repository.get(self.active_smart_collection_id)
+            edit_action = self.collection_menu.addAction("Edit Current Smart Collection…")
+            edit_action.triggered.connect(
+                lambda: self.edit_smart_collection(self.active_smart_collection_id)
+                if self.active_smart_collection_id is not None else None
+            )
+            refresh_action = self.collection_menu.addAction("Refresh Current Smart Collection")
+            refresh_action.triggered.connect(
+                lambda: self.open_smart_collection(self.active_smart_collection_id)
+                if self.active_smart_collection_id is not None else None
+            )
+            delete_action = self.collection_menu.addAction("Delete Current Smart Collection…")
+            delete_action.triggered.connect(
+                lambda: self.delete_smart_collection(self.active_smart_collection_id)
+                if self.active_smart_collection_id is not None else None
+            )
+            if collection is not None:
+                edit_action.setStatusTip(f'Edit rules for "{collection.name}"')
         else:
             unavailable = self.collection_menu.addAction("No collection open")
             unavailable.setEnabled(False)
@@ -863,9 +1005,88 @@ class MainWindow(QMainWindow):
         if str(directory) not in self.file_watcher.directories():
             self.file_watcher.addPath(str(directory))
 
+    def library_indexed_images(self) -> list[object]:
+        """Return indexed images that belong to explicitly registered folders."""
+        return [
+            image
+            for image in self.image_index.all_images()
+            if self.library_folder_repository.contains_path(image.path)
+        ]
+
+    def refresh_library_folders(self) -> None:
+        if not hasattr(self, "library_folder_list"):
+            return
+        self.library_folder_list.clear()
+        all_images = self.library_indexed_images()
+        all_item = QListWidgetItem(f"All Images ({len(all_images)})")
+        all_item.setData(Qt.ItemDataRole.UserRole, "all")
+        self.library_folder_list.addItem(all_item)
+        for folder in self.library_folder_repository.list():
+            count = sum(1 for image in all_images if image.path.parent == folder.path)
+            item = QListWidgetItem(f"{folder.path.name or folder.path} ({count})")
+            item.setToolTip(str(folder.path))
+            item.setData(Qt.ItemDataRole.UserRole, folder.id)
+            self.library_folder_list.addItem(item)
+
+    def library_folder_activated(self, item: QListWidgetItem) -> None:
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if value == "all":
+            paths = [image.path for image in self.library_indexed_images() if image.path.is_file()]
+            if self.prompt_view_state is None:
+                self.prompt_view_state = self.capture_browser_state()
+            self.active_collection_id = None
+            self.active_smart_collection_id = None
+            self.active_tag_id = None
+            self.prompt_view_paths = paths
+            self.prompt_view_title = "All Images"
+            self.prompt_view_label.setText(f"Library: All Images — {len(paths)} image(s)")
+            self.prompt_view_bar.setVisible(True)
+            base = paths[0].parent if paths else (self.current_directory or Path.home())
+            self.load_directory(base, image_paths=paths)
+            if not paths:
+                self.preview.setText("No images have been indexed in the library yet.")
+            return
+        if isinstance(value, int):
+            folder = self.library_folder_repository.get(value)
+            if folder is not None and folder.path.is_dir():
+                self.clear_prompt_view_state()
+                self.select_directory_in_tree(folder.path)
+                self.load_directory(folder.path)
+
+    def add_folder_to_library(self) -> None:
+        start = str(self.current_directory or Path.home())
+        selected = QFileDialog.getExistingDirectory(self, "Add Folder to Library", start)
+        if not selected:
+            return
+        path = Path(selected)
+        try:
+            self.library_folder_repository.add(path)
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to add folder", str(error))
+            return
+        self.refresh_library_folders()
+        self.clear_prompt_view_state()
+        self.select_directory_in_tree(path)
+        self.load_directory(path)
+        self.statusBar().showMessage(f"Added {path} to the library", 4000)
+
+    def manage_library_folders(self) -> None:
+        dialog = ManageLibraryFoldersDialog(self.library_folder_repository, self)
+        dialog.changed.connect(self.refresh_library_folders)
+        dialog.openRequested.connect(self.open_registered_library_folder)
+        dialog.exec()
+        self.refresh_library_folders()
+
+    def open_registered_library_folder(self, path_object: object) -> None:
+        if not isinstance(path_object, Path) or not path_object.is_dir():
+            return
+        self.clear_prompt_view_state()
+        self.select_directory_in_tree(path_object)
+        self.load_directory(path_object)
+
     def choose_directory(self) -> None:
         selected = QFileDialog.getExistingDirectory(
-            self, "Choose image directory", str(self.current_directory or Path.home())
+            self, "Browse image folder", str(self.current_directory or Path.home())
         )
         if selected:
             directory = Path(selected)
@@ -892,6 +1113,35 @@ class MainWindow(QMainWindow):
                 preserve_state=True,
                 image_paths=self.prompt_view_paths,
             )
+
+    def focus_filename_search(self) -> None:
+        self.filename_search_box.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.filename_search_box.selectAll()
+
+    def rename_current_sidebar_item(self) -> None:
+        if self.collection_list.hasFocus():
+            item = self.collection_list.currentItem()
+            if item is not None and isinstance(item.data(Qt.ItemDataRole.UserRole), int):
+                self.rename_collection(item.data(Qt.ItemDataRole.UserRole))
+                return
+        if self.smart_collection_list.hasFocus():
+            item = self.smart_collection_list.currentItem()
+            if item is not None and isinstance(item.data(Qt.ItemDataRole.UserRole), int):
+                self.edit_smart_collection(item.data(Qt.ItemDataRole.UserRole))
+                return
+        if self.tag_list.hasFocus():
+            item = self.tag_list.currentItem()
+            if item is not None and isinstance(item.data(Qt.ItemDataRole.UserRole), int):
+                self.rename_tag(item.data(Qt.ItemDataRole.UserRole))
+                return
+        if self.active_collection_id is not None:
+            self.rename_collection(self.active_collection_id)
+        elif self.active_smart_collection_id is not None:
+            self.edit_smart_collection(self.active_smart_collection_id)
+        elif self.active_tag_id is not None:
+            self.rename_tag(self.active_tag_id)
+        else:
+            self.statusBar().showMessage("Select a collection, Smart Collection, or tag to rename", 3000)
 
     def create_filter_row(
         self,
@@ -1072,14 +1322,26 @@ class MainWindow(QMainWindow):
         generation = self.thumbnail_generation
         self.lazy_load_timer.stop()
         self.current_directory = directory
+        self.index_scan_persist = (
+            image_paths is None
+            and self.library_folder_repository.contains_folder(directory)
+        )
         if image_paths is None:
             self.watch_directory(directory)
-            self.folder_label.setText(str(directory))
+            membership = "Library" if self.index_scan_persist else "Browsing"
+            self.folder_label.setText(f"{membership} — {directory}")
         else:
             watched = self.file_watcher.directories()
             if watched:
                 self.file_watcher.removePaths(watched)
-            view_kind = "Collection" if self.active_collection_id is not None else "Prompt Library"
+            if self.active_collection_id is not None:
+                view_kind = "Collection"
+            elif self.active_smart_collection_id is not None:
+                view_kind = "Smart Collection"
+            elif self.active_tag_id is not None:
+                view_kind = "Tag"
+            else:
+                view_kind = "Prompt Library"
             self.folder_label.setText(
                 f"{view_kind} — {self.prompt_view_title} ({len(image_paths)} images)"
             )
@@ -1117,7 +1379,8 @@ class MainWindow(QMainWindow):
         try:
             if image_paths is None:
                 image_paths = self.sorted_image_paths(directory)
-                self.image_index.prune_directory(directory, image_paths)
+                if self.index_scan_persist:
+                    self.image_index.prune_directory(directory, image_paths)
             else:
                 image_paths = sorted(
                     [path for path in image_paths if path.is_file()],
@@ -1127,6 +1390,11 @@ class MainWindow(QMainWindow):
         except OSError as error:
             QMessageBox.critical(self, "Unable to open folder", str(error))
             return
+
+        self.index_scan_generation = generation
+        self.index_scan_total = len(image_paths)
+        self.index_scan_completed = 0
+        self.update_index_status()
 
         for path in image_paths:
             item = QListWidgetItem(path.name)
@@ -1148,18 +1416,37 @@ class MainWindow(QMainWindow):
             if str(path) in preserved_selection:
                 item.setSelected(True)
 
-            metadata_worker = MetadataWorker(path, generation)
-            metadata_worker.signals.loaded.connect(self.model_loaded)
-            self.thread_pool.start(metadata_worker)
+            try:
+                stat = path.stat()
+                modified_ns = stat.st_mtime_ns
+                file_size = stat.st_size
+            except OSError:
+                modified_ns = 0
+                file_size = 0
+
+            indexed = self.image_index.get(path)
+            if (
+                indexed is not None
+                and not self.image_index.needs_refresh(path, modified_ns, file_size)
+            ):
+                self.apply_indexed_metadata(item, indexed)
+                self.index_scan_completed += 1
+            else:
+                metadata_worker = MetadataWorker(path, generation)
+                metadata_worker.signals.loaded.connect(self.model_loaded)
+                metadata_worker.signals.failed.connect(self.model_failed)
+                self.thread_pool.start(metadata_worker)
 
         count = len(image_paths)
         if count == 0:
             self.statusBar().showMessage("No images found")
             return
 
+        pending = max(0, self.index_scan_total - self.index_scan_completed)
         self.statusBar().showMessage(
-            f"{count} images — scanning generation metadata"
+            f"{count} images — " + (f"reading {pending} metadata record(s)" if pending and not self.index_scan_persist else (f"indexing {pending} metadata record(s)" if pending else ("library index up to date" if self.index_scan_persist else "browse metadata ready")))
         )
+        self.update_index_status()
 
         current_item = (
             self.thumbnail_items.get(preserved_current)
@@ -1174,6 +1461,80 @@ class MainWindow(QMainWindow):
         self.apply_filters()
         QTimer.singleShot(0, self.queue_visible_thumbnails)
 
+    def update_index_status(self) -> None:
+        total = self.index_scan_total
+        completed = min(self.index_scan_completed, total)
+        if not self.index_scan_persist and self.current_directory is not None:
+            if total > 0 and completed < total:
+                self.index_status_label.setText(f"Reading metadata: {completed}/{total}")
+                self.index_status_label.setToolTip("This folder is being browsed temporarily and is not being added to the library")
+            else:
+                self.index_status_label.setText("Browse mode")
+                self.index_status_label.setToolTip("This folder is not part of the managed library")
+            return
+        if total <= 0 or completed >= total:
+            library_images = self.library_indexed_images()
+            self.index_status_label.setText(f"Library: {len(library_images)} images")
+            self.index_status_label.setToolTip(
+                f"{len(library_images)} indexed images in {len(self.library_folder_repository.list())} registered folder(s)"
+            )
+        else:
+            self.index_status_label.setText(f"Indexing library: {completed}/{total}")
+            self.index_status_label.setToolTip("Generation metadata is being added to the managed library")
+
+    def apply_indexed_metadata(self, item: QListWidgetItem, indexed: object) -> None:
+        model = str(getattr(indexed, "model", "") or UNKNOWN_MODEL)
+        sampler = str(getattr(indexed, "sampler", "") or UNKNOWN_SAMPLER)
+        scheduler = str(getattr(indexed, "scheduler", "") or UNKNOWN_SCHEDULER)
+        positive_prompt = str(getattr(indexed, "positive_prompt", ""))
+        try:
+            loras = json.loads(str(getattr(indexed, "loras_json", "[]")))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            loras = []
+        tooltip_data = {
+            "model": model,
+            "sampler": sampler,
+            "scheduler": scheduler,
+            "steps": str(getattr(indexed, "steps", "")),
+            "resolution": str(getattr(indexed, "resolution", "")),
+            "loras": loras,
+        }
+        item.setData(MODEL_ROLE, model)
+        item.setData(SAMPLER_ROLE, sampler)
+        item.setData(SCHEDULER_ROLE, scheduler)
+        item.setData(POSITIVE_PROMPT_ROLE, positive_prompt)
+        path_string = str(item.data(PATH_ROLE) or "")
+        tooltip = self.thumbnail_metadata_tooltip(path_string, tooltip_data)
+        if path_string:
+            tag_names = self.tag_repository.names_for_path(Path(path_string))
+            if tag_names:
+                tooltip += "\n\nTags: " + ", ".join(tag_names)
+        item.setToolTip(tooltip)
+        self.add_filter_button("model", model)
+        self.add_filter_button("sampler", sampler)
+        self.add_filter_button("scheduler", scheduler)
+
+    def model_failed(self, path_string: str, error_message: str, generation: int) -> None:
+        """Complete a metadata-index task even when one image cannot be parsed."""
+        if generation == self.index_scan_generation:
+            self.index_scan_completed = min(
+                self.index_scan_total, self.index_scan_completed + 1
+            )
+            self.update_index_status()
+            if self.index_scan_completed >= self.index_scan_total:
+                self.statusBar().showMessage(
+                    f"{self.index_scan_total} images — metadata index complete with errors",
+                    5000,
+                )
+                self.refresh_library_folders()
+                if self.active_smart_collection_id is not None:
+                    smart_id = self.active_smart_collection_id
+                    QTimer.singleShot(0, lambda: self.open_smart_collection(smart_id))
+
+        item = self.thumbnail_items.get(path_string)
+        if item is not None:
+            item.setToolTip(f"{path_string}\nMetadata error: {error_message}")
+
     def model_loaded(
         self,
         path_string: str,
@@ -1186,12 +1547,30 @@ class MainWindow(QMainWindow):
         modified_ns: int,
         file_size: int,
     ) -> None:
-        self.image_index.index_metadata(
-            Path(path_string),
-            positive_prompt,
-            modified_ns,
-            file_size,
-        )
+        if generation == self.index_scan_generation and self.index_scan_persist:
+            self.image_index.index_metadata(
+                Path(path_string),
+                positive_prompt,
+                modified_ns,
+                file_size,
+                model=model,
+                sampler=sampler,
+                scheduler=scheduler,
+                steps=str(tooltip_data.get("steps", "")) if isinstance(tooltip_data, dict) else "",
+                resolution=str(tooltip_data.get("resolution", "")) if isinstance(tooltip_data, dict) else "",
+                loras_json=json.dumps(tooltip_data.get("loras", [])) if isinstance(tooltip_data, dict) else "[]",
+            )
+        if generation == self.index_scan_generation:
+            self.index_scan_completed = min(self.index_scan_total, self.index_scan_completed + 1)
+            self.update_index_status()
+            if self.index_scan_completed >= self.index_scan_total:
+                self.statusBar().showMessage(
+                    f"{self.index_scan_total} images — metadata index up to date", 3000
+                )
+                self.refresh_library_folders()
+                if self.active_smart_collection_id is not None:
+                    smart_id = self.active_smart_collection_id
+                    QTimer.singleShot(0, lambda: self.open_smart_collection(smart_id))
         if generation != self.thumbnail_generation:
             return
 
@@ -1203,7 +1582,11 @@ class MainWindow(QMainWindow):
         item.setData(SAMPLER_ROLE, sampler)
         item.setData(SCHEDULER_ROLE, scheduler)
         item.setData(POSITIVE_PROMPT_ROLE, positive_prompt)
-        item.setToolTip(self.thumbnail_metadata_tooltip(path_string, tooltip_data))
+        tooltip = self.thumbnail_metadata_tooltip(path_string, tooltip_data)
+        tag_names = self.tag_repository.names_for_path(Path(path_string))
+        if tag_names:
+            tooltip += "\n\nTags: " + ", ".join(tag_names)
+        item.setToolTip(tooltip)
 
         self.add_filter_button("model", model)
         self.add_filter_button("sampler", sampler)
@@ -1499,29 +1882,41 @@ class MainWindow(QMainWindow):
         self.rating_label.setEnabled(enabled)
 
     def set_current_rating(self, rating: int) -> None:
-        path = self.selected_image_path()
-        if path is None:
+        paths = self.selected_image_paths()
+        if not paths:
             QMessageBox.information(
                 self,
                 "Select an image",
-                "Select a thumbnail before setting its rating.",
+                "Select one or more thumbnails before setting a rating.",
             )
             return
-        self.current_image_path = path
         value = max(0, min(5, int(rating)))
-        self.ratings_database.set(path, value)
-        item = self.thumbnail_items.get(str(path))
-        if item is not None:
-            item.setData(RATING_ROLE, value)
-            base_tip = str(path)
-            item.setToolTip(f"{base_tip}\nRating: {rating_text(value)}" if value else base_tip)
+        for path in paths:
+            self.ratings_database.set(path, value)
+            item = self.thumbnail_items.get(str(path.resolve())) or self.thumbnail_items.get(str(path))
+            if item is not None:
+                item.setData(RATING_ROLE, value)
+                indexed = self.image_index.get(path)
+                if indexed is not None:
+                    self.apply_indexed_metadata(item, indexed)
+        current = self.selected_image_path()
+        if current is not None:
+            self.current_image_path = current
         self.update_rating_controls(value, enabled=True)
-        self.statusBar().showMessage(
-            f"{path.name}: " + (f"rated {value} star" + ("" if value == 1 else "s") if value else "rating cleared"),
-            3000,
+        count = len(paths)
+        description = (
+            f"rated {value} star" + ("" if value == 1 else "s")
+            if value
+            else "rating cleared"
         )
-        if self.current_sort_mode().startswith("rating_") and self.current_directory is not None:
-            self.load_directory(self.current_directory, preserve_state=True)
+        self.statusBar().showMessage(
+            f"{count} image{'s' if count != 1 else ''}: {description}", 3000
+        )
+        if self.active_smart_collection_id is not None:
+            smart_id = self.active_smart_collection_id
+            QTimer.singleShot(0, lambda: self.open_smart_collection(smart_id))
+        elif self.current_sort_mode().startswith("rating_") and self.current_directory is not None:
+            self.load_directory(self.current_directory, preserve_state=True, image_paths=self.prompt_view_paths)
         else:
             self.apply_filters()
             self.schedule_visible_thumbnail_load()
@@ -1555,8 +1950,9 @@ class MainWindow(QMainWindow):
         """Leave any temporary prompt or similarity-results view."""
         self.prompt_view_state = None
         self.active_collection_id = None
+        self.active_smart_collection_id = None
+        self.active_tag_id = None
         self.prompt_view_paths = None
-        self.active_collection_id = None
         self.prompt_view_title = ""
         self.similarity_matches = None
         self.similarity_reference = None
@@ -1594,6 +1990,9 @@ class MainWindow(QMainWindow):
     def return_from_prompt_view(self) -> None:
         """Restore the browser state captured before a temporary results view."""
         state = self.prompt_view_state
+        self.active_collection_id = None
+        self.active_smart_collection_id = None
+        self.active_tag_id = None
         self.prompt_view_paths = None
         self.prompt_view_title = ""
         self.similarity_matches = None
@@ -1837,24 +2236,25 @@ class MainWindow(QMainWindow):
         selected = self.selected_image_paths()
         if not selected:
             return
-        menu = QMenu(self.image_list)
 
+        menu = QMenu(self.image_list)
         preview_action = menu.addAction("Preview")
         preview_action.setEnabled(len(selected) == 1)
         preview_action.triggered.connect(self.preview_selected_image)
 
-        open_action = menu.addAction("Open Image")
+        compare_action = menu.addAction("Compare Selected…")
+        compare_action.setEnabled(len(selected) == 2)
+        compare_action.triggered.connect(self.compare_selected_images)
+        compare_with_action = menu.addAction("Compare With…")
+        compare_with_action.setEnabled(len(selected) == 1)
+        compare_with_action.triggered.connect(self.start_compare_with_selected)
+
+        open_action = menu.addAction("Open in System Viewer")
         open_action.setEnabled(len(selected) == 1)
         open_action.triggered.connect(self.open_selected_image)
-
-        reveal_label = self.file_manager_action_label()
-        reveal_action = menu.addAction(reveal_label)
+        reveal_action = menu.addAction(self.file_manager_action_label())
         reveal_action.setEnabled(len(selected) == 1)
         reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
-
-        copy_path_action = menu.addAction("Copy Path")
-        copy_path_action.setEnabled(len(selected) == 1)
-        copy_path_action.triggered.connect(self.copy_selected_image_path)
 
         menu.addSeparator()
         add_collection_menu = menu.addMenu("Add to Collection")
@@ -1869,19 +2269,47 @@ class MainWindow(QMainWindow):
         add_collection_menu.addSeparator()
         new_collection_action = add_collection_menu.addAction("New Collection…")
         new_collection_action.triggered.connect(self.create_collection_from_selection)
+
+        manage_tags_action = menu.addAction("Manage Tags…")
+        manage_tags_action.triggered.connect(self.manage_selected_tags)
+        add_experiment_action = menu.addAction("Add to Experiment…")
+        add_experiment_action.triggered.connect(self.add_selection_to_experiment)
+        create_experiment_action = menu.addAction("Create Experiment…")
+        create_experiment_action.triggered.connect(self.create_experiment_from_selection)
+
         if self.active_collection_id is not None:
             remove_collection_action = menu.addAction("Remove from Collection")
             remove_collection_action.triggered.connect(self.remove_selection_from_active_collection)
+
         menu.addSeparator()
-        compare_action = menu.addAction("Compare…")
-        compare_action.setEnabled(len(selected) == 2)
-        compare_action.triggered.connect(self.compare_selected_images)
+        rating_menu = menu.addMenu("Set Rating")
+        for rating in range(1, 6):
+            action = rating_menu.addAction(f"{rating} star" + ("" if rating == 1 else "s"))
+            action.triggered.connect(
+                lambda _checked=False, value=rating: self.set_current_rating(value)
+            )
+        rating_menu.addSeparator()
+        clear_rating = rating_menu.addAction("Clear rating")
+        clear_rating.triggered.connect(lambda: self.set_current_rating(0))
+
+        copy_menu = menu.addMenu("Copy")
+        copy_prompt = copy_menu.addAction("Positive Prompt")
+        copy_prompt.setEnabled(len(selected) == 1)
+        copy_prompt.triggered.connect(self.copy_selected_positive_prompt)
+        copy_negative = copy_menu.addAction("Negative Prompt")
+        copy_negative.setEnabled(len(selected) == 1)
+        copy_negative.triggered.connect(self.copy_selected_negative_prompt)
+        copy_metadata = copy_menu.addAction("Metadata as JSON")
+        copy_metadata.setEnabled(len(selected) == 1)
+        copy_metadata.triggered.connect(self.copy_selected_metadata_json)
+        copy_path = copy_menu.addAction("File Path")
+        copy_path.setEnabled(len(selected) == 1)
+        copy_path.triggered.connect(self.copy_selected_image_path)
+
         similar_action = menu.addAction("Find Similar…")
         similar_action.setEnabled(len(selected) == 1)
         similar_action.triggered.connect(self.find_similar_images)
-        menu.addSeparator()
-        create_action = menu.addAction("Create Experiment…")
-        create_action.triggered.connect(self.create_experiment_from_selection)
+
         menu.addSeparator()
         delete_action = menu.addAction("Move to Trash…")
         delete_action.setEnabled(len(selected) == 1)
@@ -1937,6 +2365,8 @@ class MainWindow(QMainWindow):
         if self.prompt_view_state is None:
             self.prompt_view_state = self.capture_browser_state()
         self.active_collection_id = collection_id
+        self.active_smart_collection_id = None
+        self.active_tag_id = None
         self.prompt_view_paths = paths
         self.prompt_view_title = collection.name
         self.prompt_view_label.setText(f'Collection: "{collection.name}" — {len(paths)} image(s)')
@@ -1946,6 +2376,24 @@ class MainWindow(QMainWindow):
         if not paths:
             self.preview.clear()
             self.preview.setText("This collection is empty.\n\nDrag images onto it or use Add to Collection.")
+
+    def add_selection_to_collection_dialog(self) -> None:
+        paths = self.selected_image_paths()
+        if not paths:
+            QMessageBox.information(self, "Select images", "Select one or more images first.")
+            return
+        collections = self.collection_repository.list()
+        if not collections:
+            self.create_collection_from_selection()
+            return
+        names = [collection.name for collection in collections]
+        choice, accepted = QInputDialog.getItem(
+            self, "Add to Collection", "Collection:", names, 0, False
+        )
+        if not accepted:
+            return
+        collection = collections[names.index(choice)]
+        self.add_selection_to_collection(collection.id)
 
     def add_selection_to_collection(self, collection_id: int) -> None:
         paths = self.selected_image_paths()
@@ -2029,6 +2477,283 @@ class MainWindow(QMainWindow):
             self.return_from_prompt_view()
         self.refresh_collections()
 
+
+    def refresh_smart_collections(self) -> None:
+        if not hasattr(self, "smart_collection_list"):
+            return
+        selected_id = None
+        current = self.smart_collection_list.currentItem()
+        if current is not None:
+            selected_id = current.data(Qt.ItemDataRole.UserRole)
+        self.smart_collection_list.clear()
+        for collection in self.smart_collection_repository.list():
+            item = QListWidgetItem(collection.name)
+            item.setData(Qt.ItemDataRole.UserRole, collection.id)
+            item.setToolTip(
+                "All rules must match:\n"
+                + "\n".join(
+                    f"• {rule.field} {rule.operator.replace('_', ' ')} {rule.value}"
+                    for rule in collection.rules
+                )
+            )
+            self.smart_collection_list.addItem(item)
+            if collection.id == selected_id:
+                self.smart_collection_list.setCurrentItem(item)
+
+    def create_smart_collection(self) -> None:
+        dialog = SmartCollectionDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            collection = self.smart_collection_repository.create(
+                dialog.collection_name, dialog.rules
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to create smart collection", str(error))
+            return
+        self.refresh_smart_collections()
+        self.open_smart_collection(collection.id)
+
+    def edit_smart_collection(self, collection_id: int) -> None:
+        collection = self.smart_collection_repository.get(collection_id)
+        if collection is None:
+            return
+        dialog = SmartCollectionDialog(collection, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.smart_collection_repository.update(
+                collection_id, dialog.collection_name, dialog.rules
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to update smart collection", str(error))
+            return
+        self.refresh_smart_collections()
+        if self.active_smart_collection_id == collection_id:
+            self.open_smart_collection(collection_id)
+
+    def delete_smart_collection(self, collection_id: int) -> None:
+        collection = self.smart_collection_repository.get(collection_id)
+        if collection is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Smart Collection?",
+            f'Delete smart collection "{collection.name}"? Image files will not be deleted.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.smart_collection_repository.delete(collection_id)
+        if self.active_smart_collection_id == collection_id:
+            self.active_smart_collection_id = None
+            self.return_from_prompt_view()
+        self.refresh_smart_collections()
+
+    def smart_collection_activated(self, item: QListWidgetItem) -> None:
+        collection_id = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(collection_id, int):
+            self.open_smart_collection(collection_id)
+
+    def open_smart_collection(self, collection_id: int) -> None:
+        collection = self.smart_collection_repository.get(collection_id)
+        if collection is None:
+            self.refresh_smart_collections()
+            return
+        if self.prompt_view_state is None:
+            self.prompt_view_state = self.capture_browser_state()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            paths = evaluate_indexed_smart_collection(
+                collection,
+                self.library_indexed_images(),
+                self.ratings_database.get,
+                self.tag_repository.names_for_path,
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.active_collection_id = None
+        self.active_tag_id = None
+        self.active_smart_collection_id = collection_id
+        self.prompt_view_paths = paths
+        self.prompt_view_title = collection.name
+        self.prompt_view_label.setText(
+            f'Smart Collection: "{collection.name}" — {len(paths)} image(s)'
+        )
+        self.prompt_view_bar.setVisible(True)
+        base_directory = paths[0].parent if paths else (self.current_directory or Path.home())
+        self.load_directory(base_directory, image_paths=paths)
+        if not paths:
+            self.preview.clear()
+            self.preview.setText("No indexed images currently match this Smart Collection.")
+
+    def show_smart_collection_context_menu(self, position: QPoint) -> None:
+        item = self.smart_collection_list.itemAt(position)
+        menu = QMenu(self.smart_collection_list)
+        new_action = menu.addAction("New Smart Collection…")
+        new_action.triggered.connect(self.create_smart_collection)
+        if item is not None:
+            collection_id = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(collection_id, int):
+                menu.addSeparator()
+                open_action = menu.addAction("Open")
+                open_action.triggered.connect(lambda: self.open_smart_collection(collection_id))
+                edit_action = menu.addAction("Edit Rules…")
+                edit_action.triggered.connect(lambda: self.edit_smart_collection(collection_id))
+                delete_action = menu.addAction("Delete Smart Collection…")
+                delete_action.triggered.connect(lambda: self.delete_smart_collection(collection_id))
+        menu.exec(self.smart_collection_list.viewport().mapToGlobal(position))
+
+    def refresh_tags(self) -> None:
+        if not hasattr(self, "tag_list"):
+            return
+        selected_id = None
+        current = self.tag_list.currentItem()
+        if current is not None:
+            selected_id = current.data(Qt.ItemDataRole.UserRole)
+        self.tag_list.clear()
+        for tag in self.tag_repository.list():
+            item = QListWidgetItem(f"{tag.name} ({self.tag_repository.count(tag.id)})")
+            item.setData(Qt.ItemDataRole.UserRole, tag.id)
+            self.tag_list.addItem(item)
+            if tag.id == selected_id:
+                self.tag_list.setCurrentItem(item)
+
+    def create_tag(self) -> None:
+        name, accepted = QInputDialog.getText(self, "New Tag", "Tag name:")
+        if not accepted:
+            return
+        try:
+            tag = self.tag_repository.create(name)
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to create tag", str(error))
+            return
+        self.refresh_tags()
+        paths = self.selected_image_paths()
+        if paths:
+            self.tag_repository.assign(tag.id, paths)
+            self.refresh_tags()
+            self.refresh_selected_tag_tooltips(paths)
+
+    def manage_selected_tags(self) -> None:
+        paths = self.selected_image_paths()
+        if not paths:
+            QMessageBox.information(self, "Select images", "Select one or more images before managing tags.")
+            return
+        dialog = ManageTagsDialog(self.tag_repository, paths, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        added, removed = dialog.apply_changes()
+        self.refresh_tags()
+        self.refresh_selected_tag_tooltips(paths)
+        if self.active_tag_id is not None:
+            self.open_tag(self.active_tag_id)
+        if self.active_smart_collection_id is not None:
+            self.open_smart_collection(self.active_smart_collection_id)
+        self.statusBar().showMessage(f"Tags updated — {added} assignment(s) added, {removed} removed", 4000)
+
+    def add_dropped_images_to_tag(self, tag_id: int, paths: object) -> None:
+        image_paths = [path for path in paths if isinstance(path, Path)] if isinstance(paths, list) else []
+        if not image_paths:
+            return
+        added = self.tag_repository.assign(tag_id, image_paths)
+        self.refresh_tags()
+        self.refresh_selected_tag_tooltips(image_paths)
+        if self.active_tag_id == tag_id:
+            self.open_tag(tag_id)
+        if self.active_smart_collection_id is not None:
+            self.open_smart_collection(self.active_smart_collection_id)
+        self.statusBar().showMessage(
+            f"Assigned tag to {added} image{'s' if added != 1 else ''}", 3000
+        )
+
+    def refresh_selected_tag_tooltips(self, paths: list[Path]) -> None:
+        for path in paths:
+            item = self.thumbnail_items.get(str(path.resolve())) or self.thumbnail_items.get(str(path))
+            if item is None:
+                continue
+            indexed = self.image_index.get(path)
+            if indexed is not None:
+                self.apply_indexed_metadata(item, indexed)
+
+    def tag_activated(self, item: QListWidgetItem) -> None:
+        tag_id = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(tag_id, int):
+            self.open_tag(tag_id)
+
+    def open_tag(self, tag_id: int) -> None:
+        tag = self.tag_repository.get(tag_id)
+        if tag is None:
+            self.refresh_tags()
+            return
+        if self.prompt_view_state is None:
+            self.prompt_view_state = self.capture_browser_state()
+        paths = self.tag_repository.paths(tag_id)
+        self.active_collection_id = None
+        self.active_smart_collection_id = None
+        self.active_tag_id = tag_id
+        self.prompt_view_paths = paths
+        self.prompt_view_title = tag.name
+        self.prompt_view_label.setText(f'Tag: "{tag.name}" — {len(paths)} image(s)')
+        self.prompt_view_bar.setVisible(True)
+        base_directory = paths[0].parent if paths else (self.current_directory or Path.home())
+        self.load_directory(base_directory, image_paths=paths)
+        if not paths:
+            self.preview.clear()
+            self.preview.setText("No images currently use this tag.")
+
+    def rename_tag(self, tag_id: int) -> None:
+        tag = self.tag_repository.get(tag_id)
+        if tag is None:
+            return
+        name, accepted = QInputDialog.getText(self, "Rename Tag", "Tag name:", text=tag.name)
+        if not accepted:
+            return
+        try:
+            self.tag_repository.rename(tag_id, name)
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to rename tag", str(error))
+            return
+        self.refresh_tags()
+        if self.active_tag_id == tag_id:
+            self.open_tag(tag_id)
+
+    def delete_tag(self, tag_id: int) -> None:
+        tag = self.tag_repository.get(tag_id)
+        if tag is None:
+            return
+        answer = QMessageBox.question(
+            self, "Delete Tag?",
+            f'Delete tag "{tag.name}" and remove it from all images?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.tag_repository.delete(tag_id)
+        if self.active_tag_id == tag_id:
+            self.active_tag_id = None
+            self.return_from_prompt_view()
+        self.refresh_tags()
+
+    def show_tag_context_menu(self, position: QPoint) -> None:
+        item = self.tag_list.itemAt(position)
+        menu = QMenu(self.tag_list)
+        new_action = menu.addAction("New Tag…")
+        new_action.triggered.connect(self.create_tag)
+        if item is not None:
+            tag_id = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(tag_id, int):
+                menu.addSeparator()
+                open_action = menu.addAction("Open")
+                open_action.triggered.connect(lambda: self.open_tag(tag_id))
+                rename_action = menu.addAction("Rename…")
+                rename_action.triggered.connect(lambda: self.rename_tag(tag_id))
+                delete_action = menu.addAction("Delete Tag…")
+                delete_action.triggered.connect(lambda: self.delete_tag(tag_id))
+        menu.exec(self.tag_list.viewport().mapToGlobal(position))
+
     def create_experiment_from_selection(self) -> None:
         paths = self.selected_image_paths()
         if not paths:
@@ -2066,6 +2791,14 @@ class MainWindow(QMainWindow):
             5000,
         )
         ExperimentSummaryDialog(self.experiment_service, notebook, aggregate.experiment.id, analysis, self).exec()
+
+    def copy_selected_metadata_json(self) -> None:
+        path = self.selected_image_path()
+        if path is None:
+            return
+        metadata = self.current_metadata if path == self.current_image_path else read_image_metadata(path)
+        QApplication.clipboard().setText(display_json(metadata))
+        self.statusBar().showMessage("Metadata JSON copied", 3000)
 
     def copy_selected_positive_prompt(self) -> None:
         path = self.selected_image_path()
@@ -2155,9 +2888,14 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Keyboard Shortcuts",
-            "Ctrl+O  Open folder\nSpace  Preview selected image\n"
-            "Ctrl+Return  Open in system viewer\nCtrl+E  Experiment Notebook\n"
-            "Ctrl+L  Prompt Library\nF5  Refresh\nDelete  Move to Trash",
+            "Ctrl+O  Browse folder\nCtrl+Alt+O  Add folder to Library\n"
+            "Space / Enter  Preview selected image\nCtrl+Return  Open in system viewer\n"
+            "Ctrl+M  Compare two selected images\nCtrl+Alt+M  Compare With…\n"
+            "Ctrl+Alt+C  Add selection to Collection\nCtrl+T  Manage Tags\n"
+            "Ctrl+Alt+E  Add selection to Experiment\nCtrl+E  Experiment Notebook\n"
+            "Ctrl+L  Prompt Library\nCtrl+F  Focus filename search\n"
+            "Ctrl+1…5  Set rating; Ctrl+0 clears\nF2  Rename current Library item\n"
+            "F5  Refresh\nDelete  Move to Trash\nEsc  Cancel Compare With",
         )
 
     def show_about_dialog(self) -> None:
@@ -2199,6 +2937,34 @@ class MainWindow(QMainWindow):
         self.compare_button.setEnabled(
             len(self.image_list.selectedItems()) == 2
         )
+
+    def start_compare_with_selected(self) -> None:
+        path = self.selected_image_path()
+        if path is None:
+            QMessageBox.information(self, "Select an image", "Select one image to use as the comparison reference.")
+            return
+        self.compare_reference_path = path.resolve()
+        self.statusBar().showMessage(
+            f"Compare With: click another thumbnail to compare with {path.name} (Esc to cancel)",
+            8000,
+        )
+        self.image_list.setCursor(Qt.CursorShape.CrossCursor)
+
+    def thumbnail_clicked(self, item: QListWidgetItem) -> None:
+        if self.compare_reference_path is None:
+            return
+        value = item.data(PATH_ROLE)
+        if not isinstance(value, str):
+            return
+        candidate = Path(value).resolve()
+        reference = self.compare_reference_path
+        if candidate == reference:
+            self.statusBar().showMessage("Choose a different image to compare", 3000)
+            return
+        self.compare_reference_path = None
+        self.image_list.unsetCursor()
+        dialog = ComparisonDialog(reference, candidate, self)
+        dialog.exec()
 
     def compare_selected_images(self) -> None:
         selected = self.image_list.selectedItems()
@@ -2522,12 +3288,24 @@ class MainWindow(QMainWindow):
         self.update_preview()
         self.schedule_visible_thumbnail_load()
 
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape and self.compare_reference_path is not None:
+            self.compare_reference_path = None
+            self.image_list.unsetCursor()
+            self.statusBar().showMessage("Compare With cancelled", 2000)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event) -> None:
         self.save_settings()
         self.prompt_repository.close()
         self.image_index.close()
         self.experiment_service.close()
         self.collection_repository.close()
+        self.smart_collection_repository.close()
+        self.tag_repository.close()
+        self.library_folder_repository.close()
         super().closeEvent(event)
 
 

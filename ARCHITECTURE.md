@@ -142,3 +142,10 @@ metadata itself.
 ## Persistent experiment window
 
 `metaview.experiments.ui.ExperimentWindow` loads experiments by ID through `ExperimentService`. It provides A/B selection across persisted runs, reuses the headless metadata comparison services, and saves run observations and experiment conclusions through the service layer rather than writing to SQLite directly.
+
+
+## Image Index
+
+The persistent image index is the shared metadata source for library-wide features. Opening a folder discovers every supported image immediately and indexes generation metadata in background workers. Unchanged files reuse cached records; changed or migrated records are reparsed and updated.
+
+The index stores the searchable generation summary used by Prompt Library and Smart Collections, including prompt, model, sampler, scheduler, steps, resolution, and LoRA data. Smart Collections query indexed records rather than reopening image files. Folder watches trigger identity checks and stale records are pruned when a directory is rescanned.

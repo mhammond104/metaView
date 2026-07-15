@@ -61,6 +61,10 @@ class ImageIndexRepository(ABC):
         """Remove records whose files no longer exist."""
 
     @abstractmethod
+    def all_images(self) -> list[IndexedImage]:
+        """Return every indexed image in stable path order."""
+
+    @abstractmethod
     def matching_images(self, prompt: Prompt | str) -> list[IndexedImage]:
         """Return images whose normalised prompt exactly matches."""
 
@@ -111,12 +115,25 @@ class ImageIndexService:
         positive_prompt: str,
         modified_ns: int,
         file_size: int,
+        *,
+        model: str = "",
+        sampler: str = "",
+        scheduler: str = "",
+        steps: str = "",
+        resolution: str = "",
+        loras_json: str = "[]",
     ) -> IndexedImage:
         image = IndexedImage(
             path=path.resolve(),
             positive_prompt=positive_prompt,
             modified_ns=modified_ns,
             file_size=file_size,
+            model=model,
+            sampler=sampler,
+            scheduler=scheduler,
+            steps=steps,
+            resolution=resolution,
+            loras_json=loras_json,
         )
         return self.repository.upsert(image)
 
@@ -129,6 +146,18 @@ class ImageIndexService:
             directory.resolve(),
             (path.resolve() for path in existing_paths),
         )
+
+    def get(self, path: Path) -> IndexedImage | None:
+        return self.repository.get(path)
+
+    def needs_refresh(self, path: Path, modified_ns: int, file_size: int) -> bool:
+        return self.repository.needs_refresh(path, modified_ns, file_size)
+
+    def all_images(self) -> list[IndexedImage]:
+        return self.repository.all_images()
+
+    def all_paths(self) -> list[Path]:
+        return [image.path for image in self.repository.all_images()]
 
     def matching_paths(self, prompt: Prompt | str) -> list[Path]:
         return [image.path for image in self.repository.matching_images(prompt)]
@@ -144,6 +173,9 @@ class ImageIndexService:
 
     def remove_missing(self) -> int:
         return self.repository.remove_missing()
+
+    def statistics(self) -> ImageIndexStatistics:
+        return self.repository.statistics()
 
     def close(self) -> None:
         self.repository.close()

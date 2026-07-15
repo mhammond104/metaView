@@ -168,5 +168,58 @@ def test_schema_version_is_set(tmp_path: Path) -> None:
     repository = SQLiteImageIndexRepository(database)
     repository.close()
     connection = sqlite3.connect(database)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
     connection.close()
+
+
+def test_full_metadata_round_trip(tmp_path: Path) -> None:
+    repository = SQLiteImageIndexRepository(":memory:")
+    path = tmp_path / "image.png"
+    touch(path)
+    image = IndexedImage(
+        path=path,
+        positive_prompt="portrait",
+        modified_ns=10,
+        file_size=20,
+        model="Krea2",
+        sampler="euler",
+        scheduler="karras",
+        steps="8",
+        resolution="1024 × 1536",
+        loras_json='[{"name":"detail","model_strength":0.8}]',
+    )
+    repository.upsert(image)
+    restored = repository.get(path)
+    assert restored == image
+    assert restored is not None
+    assert restored.scheduler == "karras"
+    assert restored.resolution == "1024 × 1536"
+    repository.close()
+
+
+def test_v1_database_is_migrated_and_reindexed(tmp_path: Path) -> None:
+    import sqlite3
+    database = tmp_path / "old.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE indexed_images (
+            path TEXT PRIMARY KEY, directory TEXT NOT NULL,
+            positive_prompt TEXT NOT NULL DEFAULT '', prompt_key TEXT NOT NULL DEFAULT '',
+            modified_ns INTEGER NOT NULL, file_size INTEGER NOT NULL, indexed_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 1;
+        """
+    )
+    path = tmp_path / "old.png"
+    touch(path)
+    connection.execute(
+        "INSERT INTO indexed_images VALUES(?,?,?,?,?,?,?)",
+        (str(path.resolve()), str(path.parent.resolve()), "prompt", "prompt", 10, 20, "2026-01-01T00:00:00+00:00"),
+    )
+    connection.commit()
+    connection.close()
+
+    repository = SQLiteImageIndexRepository(database)
+    assert repository.needs_refresh(path, 10, 20)
+    repository.close()

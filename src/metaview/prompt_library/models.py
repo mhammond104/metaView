@@ -120,6 +120,12 @@ class IndexedImage:
     positive_prompt: str
     modified_ns: int
     file_size: int
+    model: str = ""
+    sampler: str = ""
+    scheduler: str = ""
+    steps: str = ""
+    resolution: str = ""
+    loras_json: str = "[]"
     indexed_at: datetime = field(default_factory=utc_now)
     prompt_key: str = field(init=False)
     directory: Path = field(init=False)
@@ -129,6 +135,9 @@ class IndexedImage:
             raise TypeError("path must be a pathlib.Path")
         if not isinstance(self.positive_prompt, str):
             raise TypeError("positive_prompt must be a string")
+        for field_name in ("model", "sampler", "scheduler", "steps", "resolution", "loras_json"):
+            if not isinstance(getattr(self, field_name), str):
+                raise TypeError(f"{field_name} must be a string")
         if not isinstance(self.modified_ns, int) or isinstance(self.modified_ns, bool):
             raise TypeError("modified_ns must be an integer")
         if self.modified_ns < 0:

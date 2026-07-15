@@ -1,12 +1,39 @@
+
+### Workflow and UX polish
+
+- Added a richer thumbnail context menu covering Preview, Compare, Collections, Tags, ratings, copy actions, experiments, and file management.
+- Added a two-click **Compare With…** workflow with Escape to cancel.
+- Added direct drag-and-drop assignment from thumbnails onto user tags.
+- Added consistent shortcuts for Preview, Compare, Collections, Tags, Experiments, search, and Library-item rename.
+- Added bulk rating for multi-selected images.
+- Reorganised the menu bar around File, Edit, Image, Library, Research, View, and Help.
+- Expanded the keyboard-shortcut reference and status-bar guidance.
+
 # Changelog
 
 ## [Unreleased]
 
 ### Added
 
+- Smart Collections with saved AND-based rules for rating, model, sampler, scheduler, positive prompt, and filename.
+- Smart Collection creation, editing, deletion, browsing, refresh, and empty-result guidance.
+- Background metadata indexing with visible progress and persistent library-wide index status.
 - Static Collections for organising images without moving or duplicating files.
 - Collection sidebar with image counts, drag-and-drop, and collection browsing.
 - Multi-image Add to Collection and Remove from Collection actions.
+- User-defined image tags with multi-image assignment, sidebar browsing, rename/delete actions, and thumbnail tooltip display.
+- Smart Collection rules based on user tags.
+
+### Changed
+
+- Expanded the image index to store model, sampler, scheduler, steps, resolution, and LoRA summaries.
+- Reused cached metadata for unchanged files instead of reparsing them whenever a folder is opened.
+- Smart Collections now evaluate indexed metadata and refresh automatically when background indexing completes.
+
+### Fixed
+
+- Prevented Smart Collections from omitting images whose thumbnail metadata had not yet been lazily indexed.
+- Added automatic migration and one-time backfill for older prompt-only image-index records.
 
 
 All notable changes to metaView are documented here.
@@ -90,3 +117,8 @@ All notable changes to metaView are documented here.
 - Persistent 0–5 star ratings with filtering and sorting.
 - Experiment View for identical-positive-prompt image groups.
 - Cross-platform source layout and GitHub Actions workflows.
+
+### Fixed
+
+- Prevented nanosecond file timestamps and large file sizes from overflowing Qt's 32-bit signal arguments during background indexing.
+- Ensured metadata-worker failures still advance indexing progress and cannot leave Smart Collections permanently incomplete.
