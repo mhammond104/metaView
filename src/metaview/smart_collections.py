@@ -26,7 +26,7 @@ class SmartCollectionRule:
     value: str
 
     def __post_init__(self) -> None:
-        if self.field not in {"rating", "model", "sampler", "scheduler", "prompt", "filename"}:
+        if self.field not in {"rating", "model", "sampler", "scheduler", "prompt", "filename", "tag"}:
             raise ValueError(f"Unsupported smart collection field: {self.field}")
         if self.operator not in {"is", "contains", "not_contains", "gte", "lte"}:
             raise ValueError(f"Unsupported smart collection operator: {self.operator}")
@@ -159,6 +159,7 @@ def matches_rule(
     rule: SmartCollectionRule,
     summary: dict[str, str],
     rating: int,
+    tags: tuple[str, ...] = (),
 ) -> bool:
     if rule.field == "rating":
         try:
@@ -170,6 +171,15 @@ def matches_rule(
         if rule.operator == "lte":
             return rating <= expected
         return rating == expected
+
+    if rule.field == "tag":
+        expected_folded = rule.value.strip().casefold()
+        folded_tags = tuple(tag.casefold() for tag in tags)
+        if rule.operator == "is":
+            return expected_folded in folded_tags
+        if rule.operator == "not_contains":
+            return all(expected_folded not in tag for tag in folded_tags)
+        return any(expected_folded in tag for tag in folded_tags)
 
     actual = {
         "filename": path.name,
@@ -210,6 +220,7 @@ def evaluate_indexed_smart_collection(
     collection: SmartCollection,
     images: Iterable[object],
     rating_for_path: Callable[[Path], int],
+    tags_for_path: Callable[[Path], tuple[str, ...]] | None = None,
 ) -> list[Path]:
     """Evaluate a Smart Collection from cached index metadata only."""
     matches: list[Path] = []
@@ -224,6 +235,7 @@ def evaluate_indexed_smart_collection(
             "positive": str(getattr(image, "positive_prompt", "")),
         }
         rating = rating_for_path(path)
-        if all(matches_rule(path, rule, summary, rating) for rule in collection.rules):
+        tags = tags_for_path(path) if tags_for_path is not None else ()
+        if all(matches_rule(path, rule, summary, rating, tags) for rule in collection.rules):
             matches.append(path.resolve())
     return matches

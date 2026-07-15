@@ -21,6 +21,7 @@ FIELDS = [
     ("Scheduler", "scheduler"),
     ("Positive prompt", "prompt"),
     ("Filename", "filename"),
+    ("User tag", "tag"),
 ]
 
 TEXT_OPERATORS = [
