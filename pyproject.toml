@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "metaview-genai"
 version = "0.3.0"
-description = "A desktop metadata explorer for AI-generated images."
+description = "A desktop image, metadata, prompt, and experiment manager for generative AI."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

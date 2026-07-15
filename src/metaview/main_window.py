@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
         self.lazy_load_timer.setInterval(60)
         self.lazy_load_timer.timeout.connect(self.queue_visible_thumbnails)
 
-        self.setWindowTitle("metaView GenAI Metadata Viewer")
+        self.setWindowTitle("metaView GenAI Image and Experiment Manager")
         self.setWindowIcon(QApplication.instance().windowIcon())
         self.resize(1500, 900)
         self.create_directory_tree()

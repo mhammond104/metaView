@@ -1,8 +1,0 @@
-metaView v0.3.0 Pre-Release Testing Observations
-
-- double-click on thumbnail should open Preview rather than OS image viewer
-- no way to access experiment notebook without creating a new experiment; add a button
-- expand the menu bar - File (Open Folder, Exit metaView), Edit (Copy path, Copy prompt), Image (Preview, Open Image, Show in Explorer, Move to Trash), Experiment (Compare Images, Find Similar, Create new experiment, Add to experiment) etc. to include all the application's functionalities
-- preview toolbar behaviour is odd. follows the image around when panning rather than staying top-centre; when hidden with 'T', it doesn't reappear when moving mouse cursor to the top of the screen/window
-- pixelation when zooming in with preview; can this be smoothed out on the fly?
-

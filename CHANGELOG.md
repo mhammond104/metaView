@@ -1,87 +1,70 @@
-
-### Usability pass
-
-- Double-click thumbnails to open integrated Preview.
-- Added full File/Edit/Image/Experiment/View/Help menu bar.
-- Added direct Experiment Notebook access and existing-experiment browser.
-- Fixed Preview toolbar anchoring and top-edge reveal.
-- Enabled smooth Preview scaling while zooming.
 # Changelog
 
-## 0.3.0 - Unreleased
+All notable changes to metaView are documented here.
 
-- Added Experiment Notebook foundations and UI integration.
-- Added integrated zoomable, pannable Preview with fullscreen navigation and overlay toolbar.
-- Added application-wide selectable themes: Catppuccin Macchiato, Gruvbox Dark, Tokyo Night, Dracula, Catppuccin Latte, and Gruvbox Light.
-- Restored thumbnail double-click opening and added richer context-menu actions.
-- Added cached thumbnail metadata tooltips.
-
-
-## Unreleased
-
-### Added
-- Persistent Experiment Window with selectable A/B images, thumbnail filmstrip, parameter, prompt and LoRA comparison, experiment summary, consistency warnings, editable run notes, and editable experiment conclusions.
-- Experiment service operations for updating run notes and conclusions.
-
-
-
-### Experimentation notebook — Phase 1
-
-- Added Qt-independent notebook, experiment, run, image-link, and note models.
-- Added a versioned SQLite experimentation repository with cascading ownership.
-- Added services for creating notebooks, experiments and runs, attaching images,
-  and creating retrospective experiments from selected images.
-- Added persistence and domain tests, including missing-image references and
-  cascade deletion.
-
-## Unreleased
+## [0.3.0] - Unreleased
 
 ### Added
 
-- Added the first experimentation-notebook workflow: create a persistent experiment from selected thumbnails.
-- Added inline notebook creation, ordered runs, an experiment filmstrip, and immediate fixed/variable metadata analysis.
-- Added consistency warnings for differing prompts, models, resolutions, and partially missing metadata.
+- Persistent Experiment Notebook with notebooks, experiments, ordered runs, image links, run notes, and conclusions.
+- Existing-experiment browser and direct Experiment Notebook access from the main window and menu bar.
+- Persistent Experiment Window with A/B image selection, filmstrip navigation, parameter, prompt, and LoRA comparison, experiment summaries, and consistency warnings.
+- Integrated Preview window with smooth zooming, panning, fit-to-window, 100% view, fullscreen navigation, and a floating auto-hide toolbar.
+- Full File, Edit, Image, Experiment, View, and Help menus exposing the application's main functions.
+- Thumbnail metadata tooltips showing model, sampler and steps, scheduler, resolution, and LoRAs.
+- Thumbnail context actions for Preview, external opening, copying paths, revealing files, and moving images to Trash.
+- Selectable application themes: Catppuccin Macchiato, Nord, Tokyo Night, Gruvbox Dark, Dracula, Catppuccin Latte, and Gruvbox Light.
+- Centralised UI metrics and a compact application-wide visual design system.
 
 ### Changed
 
-- Extracted ComfyUI metadata parsing into a Qt-independent service.
+- Double-clicking a thumbnail now opens the integrated Preview instead of the operating system image viewer.
+- Refined the interface with denser controls, clearer visual hierarchy, flatter toolbars, slimmer scrollbars, improved tabs, menus, focus states, and action strips.
+- Refactored ComfyUI metadata parsing into Qt-independent services.
 - Added canonical prompt and LoRA normalisation helpers.
-- Added reusable structured parameter and LoRA comparison services.
-- Refactored Compare View and Experiment View to use the shared comparison logic.
+- Added reusable structured parameter and LoRA comparison services shared by Compare View and Experiment View.
+- Improved Linux file-manager integration by launching the active graphical file manager directly where possible.
+- Renamed the application presentation from a metadata viewer to a GenAI Image and Experiment Manager.
 
-## Unreleased
+### Fixed
 
-- Display image resolution in Comparison View and Experiment View, highlighting differences.
-- Improve workflow JSON drag-and-drop compatibility on Windows, including File Explorer and Chromium-based targets.
+- Restored and redirected thumbnail double-click handling.
+- Fixed Preview toolbar anchoring so it remains top-centred while the image is panned.
+- Fixed Preview top-edge toolbar reveal behaviour.
+- Enabled smooth full-resolution scaling during Preview zoom.
+- Improved workflow JSON drag-and-drop compatibility on Windows, including File Explorer and Chromium-based targets.
+- Removed remaining user-facing Catppuccin Mocha references after migration to Macchiato.
 
-All notable changes to metaView will be documented here.
+## [0.2.1]
+
+### Fixed
+
+- Packaging and release-workflow issues following the v0.2.0 release.
+- Application startup and metadata-facade regressions in packaged builds.
 
 ## [0.2.0]
 
 ### Added
 
-- Global prompt library
-- Prompt ratings, tags, and notes
-- Prompt search, filtering, and sorting
-- Persistent global image index
-- Exact-prompt image counts
-- Cross-directory prompt result browsing
-- Temporary prompt view with previous-view-state restoration
-- Temporary similarity search results view with previous-view-state restoration
+- Global Prompt Library.
+- Prompt ratings, tags, notes, search, filtering, and sorting.
+- Persistent global image index and exact-prompt image counts.
+- Cross-directory prompt result browsing with previous-view restoration.
+- Similarity Search results view with previous-view restoration.
 
 ### Changed
-- Refactored application into focused, manageable modules
-- Replaced legacy Prompt Library backend
-- Improved thumbnail action-state handling
-- Consolidated temporary resutls views
+
+- Refactored the application into focused modules.
+- Replaced the legacy Prompt Library backend.
+- Improved thumbnail action-state handling.
+- Consolidated temporary results views.
 
 ### Fixed
-- Fixed image-rating controls after thumbnail selection
-- Fixed 'Open Image' selection handling
-- Fixed Experiment View availability with multiple selections
-- Fixed metadata panel imports after refactoring
 
-
+- Image-rating controls after thumbnail selection.
+- Open Image selection handling.
+- Experiment View availability with multiple selections.
+- Metadata-panel imports after refactoring.
 
 ## [0.1.0]
 
@@ -90,11 +73,11 @@ All notable changes to metaView will be documented here.
 - Filesystem tree, thumbnail browser, lazy loading, and persistent thumbnail cache.
 - Embedded GenAI metadata inspection for ComfyUI-oriented image workflows.
 - Search and filtering by filename, prompt, model, sampler, scheduler, and rating.
-- Responsive full-image preview.
+- Responsive full-image display.
 - Side-by-side image and metadata comparison with linked zoom and pan.
 - LoRA comparison with highlighted differences.
-- Similarity search by model, LoRAs, seed, prompt, sampler, scheduler, and resolution.
-- Persistent prompt library with tags, notes, editing, copying, and source-image links.
+- Similarity Search by model, LoRAs, seed, prompt, sampler, scheduler, and resolution.
+- Persistent Prompt Library with tags, notes, editing, copying, and source-image links.
 - Persistent 0–5 star ratings with filtering and sorting.
 - Experiment View for identical-positive-prompt image groups.
 - Cross-platform source layout and GitHub Actions workflows.

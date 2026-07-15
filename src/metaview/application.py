@@ -87,7 +87,7 @@ from .theme import apply_theme, create_splash_pixmap
 def main() -> int:
     app = QApplication(sys.argv)
     app.setOrganizationName("Broomfield Developments")
-    app.setApplicationName("metaView GenAI Metadata Viewer")
+    app.setApplicationName("metaView GenAI Image and Experiment Manager")
 
     application_icon = QIcon(str(asset_path("metaview.ico")))
     if application_icon.isNull():

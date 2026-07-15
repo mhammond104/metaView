@@ -100,5 +100,5 @@ jobs:
             release-assets/metaView-macOS.zip \
             release-assets/metaView-Linux.tar.gz \
             --verify-tag \
-            --generate-notes \
+            --notes-file RELEASE_NOTES.md \
             --title "metaView $RELEASE_TAG"
