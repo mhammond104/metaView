@@ -94,21 +94,26 @@ class ImageDragListWidget(QListWidget):
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
 
     def startDrag(self, supported_actions) -> None:
+        selected = self.selectedItems()
         item = self.currentItem()
         if item is None:
             return
+        if item not in selected:
+            selected = [item]
 
-        path_value = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(path_value, str):
-            return
-
-        image_path = Path(path_value)
-        if not image_path.is_file():
+        image_paths: list[Path] = []
+        for selected_item in selected:
+            path_value = selected_item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(path_value, str):
+                path = Path(path_value)
+                if path.is_file():
+                    image_paths.append(path)
+        if not image_paths:
             return
 
         mime_data = QMimeData()
-        mime_data.setUrls([QUrl.fromLocalFile(str(image_path))])
-        mime_data.setText(str(image_path))
+        mime_data.setUrls([QUrl.fromLocalFile(str(path)) for path in image_paths])
+        mime_data.setText("\n".join(str(path) for path in image_paths))
 
         drag = QDrag(self)
         drag.setMimeData(mime_data)
@@ -502,3 +507,43 @@ class MetadataPanel(QWidget):
 
 
 
+
+
+class CollectionListWidget(QListWidget):
+    """Collection sidebar accepting image-file drops from the thumbnail view."""
+
+    imagesDropped = Signal(int, object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self.itemAt(event.position().toPoint()) is not None and event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
+        if item is None:
+            event.ignore()
+            return
+        collection_id = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(collection_id, int):
+            event.ignore()
+            return
+        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        if not paths:
+            event.ignore()
+            return
+        self.imagesDropped.emit(collection_id, paths)
+        event.acceptProposedAction()

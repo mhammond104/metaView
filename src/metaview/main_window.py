@@ -97,7 +97,7 @@ from .metadata import (
     display_json, extract_summary, read_image_metadata,
     model_display_name, thumbnail_cache_path,
 )
-from .widgets import ImageDragListWidget, MetadataPanel
+from .widgets import CollectionListWidget, ImageDragListWidget, MetadataPanel
 from .prompt_library import (
     ImageIndexService,
     Prompt,
@@ -112,6 +112,7 @@ from .workers import MetadataWorker, ThumbnailWorker
 from .preview import PreviewWindow
 from .theme import THEMES, apply_theme, current_theme_key
 from .experiments import ExperimentService, SQLiteExperimentRepository, AnalysedImage, analyse_images
+from .collections import Collection, CollectionRepository
 from .experiments.ui import (
     CreateExperimentDialog,
     ExperimentNotebookDialog,
@@ -143,6 +144,15 @@ def image_index_database_path() -> Path:
     directory = Path(base or (Path.home() / ".metaview"))
     directory.mkdir(parents=True, exist_ok=True)
     return directory / "image_index.sqlite3"
+
+def collection_database_path() -> Path:
+    base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppDataLocation
+    )
+    directory = Path(base or (Path.home() / ".metaview"))
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "collections.sqlite3"
+
 
 def experiment_database_path() -> Path:
     base = QStandardPaths.writableLocation(
@@ -193,6 +203,8 @@ class MainWindow(QMainWindow):
         self.experiment_service = ExperimentService(
             SQLiteExperimentRepository(experiment_database_path())
         )
+        self.collection_repository = CollectionRepository(collection_database_path())
+        self.active_collection_id: int | None = None
         self.prompt_library = PromptLibraryController(
             self.prompt_repository,
             self.image_index,
@@ -367,8 +379,39 @@ class MainWindow(QMainWindow):
         self.right_splitter.setSizes([470, 370])
         self.right_splitter.splitterMoved.connect(self._preview_splitter_moved)
 
+        self.collection_list = CollectionListWidget()
+        self.collection_list.setObjectName("collectionList")
+        self.collection_list.setMaximumHeight(220)
+        self.collection_list.itemClicked.connect(self.collection_activated)
+        self.collection_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.collection_list.customContextMenuRequested.connect(self.show_collection_context_menu)
+        self.collection_list.imagesDropped.connect(self.add_dropped_images_to_collection)
+
+        collection_header = QFrame()
+        collection_header.setObjectName("collectionHeader")
+        collection_header_layout = QHBoxLayout(collection_header)
+        collection_header_layout.setContentsMargins(4, 2, 4, 2)
+        collection_header_layout.addWidget(QLabel("Collections"), 1)
+        new_collection_button = QToolButton()
+        new_collection_button.setText("+")
+        new_collection_button.setToolTip("Create collection")
+        new_collection_button.clicked.connect(self.create_collection)
+        collection_header_layout.addWidget(new_collection_button)
+
+        navigation_panel = QWidget()
+        navigation_layout = QVBoxLayout(navigation_panel)
+        navigation_layout.setContentsMargins(0, 0, 0, 0)
+        navigation_layout.setSpacing(3)
+        folders_label = QLabel("Folders")
+        folders_label.setObjectName("sectionLabel")
+        navigation_layout.addWidget(folders_label)
+        navigation_layout.addWidget(self.directory_tree, 1)
+        navigation_layout.addWidget(collection_header)
+        navigation_layout.addWidget(self.collection_list)
+        self.refresh_collections()
+
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.addWidget(self.directory_tree)
+        self.main_splitter.addWidget(navigation_panel)
         self.main_splitter.addWidget(self.thumbnail_panel)
         self.main_splitter.addWidget(self.right_splitter)
         self.main_splitter.setSizes([260, 540, 700])
@@ -501,6 +544,11 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.prompt_library_action)
         file_menu.addAction(self.experiment_notebook_action)
         file_menu.addSeparator()
+        new_collection_action = QAction("New &Collection…", self)
+        new_collection_action.setShortcut("Ctrl+Shift+N")
+        new_collection_action.triggered.connect(self.create_collection)
+        file_menu.addAction(new_collection_action)
+        file_menu.addSeparator()
         exit_action = QAction("E&xit metaView", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.setStatusTip("Close metaView")
@@ -559,6 +607,9 @@ class MainWindow(QMainWindow):
         trash_action.triggered.connect(self.move_selected_image_to_trash)
         image_menu.addAction(trash_action)
 
+        self.collection_menu = menu_bar.addMenu("&Collection")
+        self.collection_menu.aboutToShow.connect(self.populate_collection_menu)
+
         experiment_menu = menu_bar.addMenu("E&xperiment")
         experiment_menu.addAction(self.experiment_notebook_action)
         experiment_menu.addSeparator()
@@ -613,6 +664,49 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About metaView", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
+
+    def populate_collection_menu(self) -> None:
+        self.collection_menu.clear()
+        new_action = self.collection_menu.addAction("New Collection…")
+        new_action.setShortcut("Ctrl+Shift+N")
+        new_action.triggered.connect(self.create_collection)
+
+        add_menu = self.collection_menu.addMenu("Add Selection to Collection")
+        selected = bool(self.selected_image_paths())
+        collections = self.collection_repository.list()
+        for collection in collections:
+            action = add_menu.addAction(collection.name)
+            action.setEnabled(selected)
+            action.triggered.connect(
+                lambda _checked=False, collection_id=collection.id: self.add_selection_to_collection(collection_id)
+            )
+        if not collections:
+            empty_action = add_menu.addAction("No collections")
+            empty_action.setEnabled(False)
+
+        remove_action = self.collection_menu.addAction("Remove Selection from Collection")
+        remove_action.setEnabled(self.active_collection_id is not None and selected)
+        remove_action.triggered.connect(self.remove_selection_from_active_collection)
+
+        self.collection_menu.addSeparator()
+        if self.active_collection_id is not None:
+            collection = self.collection_repository.get(self.active_collection_id)
+            rename_action = self.collection_menu.addAction("Rename Current Collection…")
+            rename_action.triggered.connect(
+                lambda: self.rename_collection(self.active_collection_id)
+                if self.active_collection_id is not None else None
+            )
+            delete_action = self.collection_menu.addAction("Delete Current Collection…")
+            delete_action.triggered.connect(
+                lambda: self.delete_collection(self.active_collection_id)
+                if self.active_collection_id is not None else None
+            )
+            if collection is not None:
+                rename_action.setStatusTip(f'Rename "{collection.name}"')
+                delete_action.setStatusTip(f'Delete "{collection.name}" without deleting its images')
+        else:
+            unavailable = self.collection_menu.addAction("No collection open")
+            unavailable.setEnabled(False)
 
     @staticmethod
     def file_manager_action_label() -> str:
@@ -985,8 +1079,9 @@ class MainWindow(QMainWindow):
             watched = self.file_watcher.directories()
             if watched:
                 self.file_watcher.removePaths(watched)
+            view_kind = "Collection" if self.active_collection_id is not None else "Prompt Library"
             self.folder_label.setText(
-                f"Prompt Library — {self.prompt_view_title} ({len(image_paths)} images)"
+                f"{view_kind} — {self.prompt_view_title} ({len(image_paths)} images)"
             )
         self.image_list.clear()
         self.thumbnail_items.clear()
@@ -1459,7 +1554,9 @@ class MainWindow(QMainWindow):
     def clear_prompt_view_state(self) -> None:
         """Leave any temporary prompt or similarity-results view."""
         self.prompt_view_state = None
+        self.active_collection_id = None
         self.prompt_view_paths = None
+        self.active_collection_id = None
         self.prompt_view_title = ""
         self.similarity_matches = None
         self.similarity_reference = None
@@ -1760,6 +1857,22 @@ class MainWindow(QMainWindow):
         copy_path_action.triggered.connect(self.copy_selected_image_path)
 
         menu.addSeparator()
+        add_collection_menu = menu.addMenu("Add to Collection")
+        for collection in self.collection_repository.list():
+            action = add_collection_menu.addAction(collection.name)
+            action.triggered.connect(
+                lambda _checked=False, collection_id=collection.id: self.add_selection_to_collection(collection_id)
+            )
+        if add_collection_menu.isEmpty():
+            empty_action = add_collection_menu.addAction("No collections")
+            empty_action.setEnabled(False)
+        add_collection_menu.addSeparator()
+        new_collection_action = add_collection_menu.addAction("New Collection…")
+        new_collection_action.triggered.connect(self.create_collection_from_selection)
+        if self.active_collection_id is not None:
+            remove_collection_action = menu.addAction("Remove from Collection")
+            remove_collection_action.triggered.connect(self.remove_selection_from_active_collection)
+        menu.addSeparator()
         compare_action = menu.addAction("Compare…")
         compare_action.setEnabled(len(selected) == 2)
         compare_action.triggered.connect(self.compare_selected_images)
@@ -1774,6 +1887,147 @@ class MainWindow(QMainWindow):
         delete_action.setEnabled(len(selected) == 1)
         delete_action.triggered.connect(self.move_selected_image_to_trash)
         menu.exec(self.image_list.viewport().mapToGlobal(position))
+
+    def refresh_collections(self) -> None:
+        selected_id = None
+        current = self.collection_list.currentItem() if hasattr(self, "collection_list") else None
+        if current is not None:
+            selected_id = current.data(Qt.ItemDataRole.UserRole)
+        if not hasattr(self, "collection_list"):
+            return
+        self.collection_list.clear()
+        for collection in self.collection_repository.list():
+            count = self.collection_repository.count(collection.id)
+            item = QListWidgetItem(f"{collection.name} ({count})")
+            item.setData(Qt.ItemDataRole.UserRole, collection.id)
+            item.setToolTip(collection.name)
+            self.collection_list.addItem(item)
+            if collection.id == selected_id:
+                self.collection_list.setCurrentItem(item)
+
+    def create_collection(self) -> Collection | None:
+        name, accepted = QInputDialog.getText(self, "New Collection", "Collection name:")
+        if not accepted:
+            return None
+        try:
+            collection = self.collection_repository.create(name)
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to create collection", str(error))
+            return None
+        self.refresh_collections()
+        self.statusBar().showMessage(f'Created collection "{collection.name}"', 3000)
+        return collection
+
+    def create_collection_from_selection(self) -> None:
+        collection = self.create_collection()
+        if collection is not None:
+            self.add_selection_to_collection(collection.id)
+
+    def collection_activated(self, item: QListWidgetItem) -> None:
+        collection_id = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(collection_id, int):
+            self.open_collection(collection_id)
+
+    def open_collection(self, collection_id: int) -> None:
+        collection = self.collection_repository.get(collection_id)
+        if collection is None:
+            self.refresh_collections()
+            return
+        paths = self.collection_repository.images(collection_id)
+        if self.prompt_view_state is None:
+            self.prompt_view_state = self.capture_browser_state()
+        self.active_collection_id = collection_id
+        self.prompt_view_paths = paths
+        self.prompt_view_title = collection.name
+        self.prompt_view_label.setText(f'Collection: "{collection.name}" — {len(paths)} image(s)')
+        self.prompt_view_bar.setVisible(True)
+        base_directory = paths[0].parent if paths else (self.current_directory or Path.home())
+        self.load_directory(base_directory, image_paths=paths)
+        if not paths:
+            self.preview.clear()
+            self.preview.setText("This collection is empty.\n\nDrag images onto it or use Add to Collection.")
+
+    def add_selection_to_collection(self, collection_id: int) -> None:
+        paths = self.selected_image_paths()
+        if not paths:
+            return
+        added = self.collection_repository.add_images(collection_id, paths)
+        self.refresh_collections()
+        if self.active_collection_id == collection_id:
+            self.open_collection(collection_id)
+        self.statusBar().showMessage(f"Added {added} image(s) to collection", 3000)
+
+    def add_dropped_images_to_collection(self, collection_id: int, paths: object) -> None:
+        image_paths = [path for path in paths if isinstance(path, Path)] if isinstance(paths, list) else []
+        if not image_paths:
+            return
+        added = self.collection_repository.add_images(collection_id, image_paths)
+        self.refresh_collections()
+        if self.active_collection_id == collection_id:
+            self.open_collection(collection_id)
+        self.statusBar().showMessage(f"Added {added} image(s) to collection", 3000)
+
+    def remove_selection_from_active_collection(self) -> None:
+        if self.active_collection_id is None:
+            return
+        paths = self.selected_image_paths()
+        removed = self.collection_repository.remove_images(self.active_collection_id, paths)
+        collection_id = self.active_collection_id
+        self.refresh_collections()
+        self.open_collection(collection_id)
+        self.statusBar().showMessage(f"Removed {removed} image(s) from collection", 3000)
+
+    def show_collection_context_menu(self, position: QPoint) -> None:
+        item = self.collection_list.itemAt(position)
+        menu = QMenu(self.collection_list)
+        new_action = menu.addAction("New Collection…")
+        new_action.triggered.connect(self.create_collection)
+        if item is not None:
+            collection_id = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(collection_id, int):
+                menu.addSeparator()
+                open_action = menu.addAction("Open")
+                open_action.triggered.connect(lambda: self.open_collection(collection_id))
+                rename_action = menu.addAction("Rename…")
+                rename_action.triggered.connect(lambda: self.rename_collection(collection_id))
+                delete_action = menu.addAction("Delete Collection…")
+                delete_action.triggered.connect(lambda: self.delete_collection(collection_id))
+        menu.exec(self.collection_list.viewport().mapToGlobal(position))
+
+    def rename_collection(self, collection_id: int) -> None:
+        collection = self.collection_repository.get(collection_id)
+        if collection is None:
+            return
+        name, accepted = QInputDialog.getText(self, "Rename Collection", "Collection name:", text=collection.name)
+        if not accepted:
+            return
+        try:
+            self.collection_repository.rename(collection_id, name)
+        except ValueError as error:
+            QMessageBox.warning(self, "Unable to rename collection", str(error))
+            return
+        self.refresh_collections()
+        if self.active_collection_id == collection_id:
+            self.open_collection(collection_id)
+
+    def delete_collection(self, collection_id: int) -> None:
+        collection = self.collection_repository.get(collection_id)
+        if collection is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Collection?",
+            f'Delete collection "{collection.name}"? Image files will not be deleted.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.collection_repository.delete(collection_id)
+        if self.active_collection_id == collection_id:
+            self.active_collection_id = None
+            self.return_from_prompt_view()
+        self.refresh_collections()
 
     def create_experiment_from_selection(self) -> None:
         paths = self.selected_image_paths()
@@ -2273,6 +2527,7 @@ class MainWindow(QMainWindow):
         self.prompt_repository.close()
         self.image_index.close()
         self.experiment_service.close()
+        self.collection_repository.close()
         super().closeEvent(event)
 
 

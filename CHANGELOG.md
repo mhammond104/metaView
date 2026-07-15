@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Static Collections for organising images without moving or duplicating files.
+- Collection sidebar with image counts, drag-and-drop, and collection browsing.
+- Multi-image Add to Collection and Remove from Collection actions.
+
+
 All notable changes to metaView are documented here.
 
 ## [0.3.0] - Unreleased
