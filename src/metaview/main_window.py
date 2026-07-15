@@ -40,6 +40,7 @@ from PySide6.QtGui import (
     QIcon,
     QImage,
     QImageReader,
+    QKeySequence,
     QPixmap,
     QPalette,
     QPainter,
@@ -97,7 +98,7 @@ from .metadata import (
     display_json, extract_summary, read_image_metadata,
     model_display_name, thumbnail_cache_path,
 )
-from .widgets import CollectionListWidget, ImageDragListWidget, MetadataPanel
+from .widgets import CollectionListWidget, ImageDragListWidget, MetadataPanel, TagListWidget
 from .prompt_library import (
     ImageIndexService,
     Prompt,
@@ -227,6 +228,7 @@ class MainWindow(QMainWindow):
         self.ratings_database = ImageRatingsDatabase()
         self.active_rating_filter = "all"
         self.preview_window: PreviewWindow | None = None
+        self.compare_reference_path: Path | None = None
         self.index_scan_total = 0
         self.index_scan_completed = 0
         self.index_scan_generation = 0
@@ -283,6 +285,7 @@ class MainWindow(QMainWindow):
         self.image_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.image_list.currentItemChanged.connect(self.image_selected)
         self.image_list.itemDoubleClicked.connect(self.preview_thumbnail_from_item)
+        self.image_list.itemClicked.connect(self.thumbnail_clicked)
         self.image_list.itemSelectionChanged.connect(self.thumbnail_selection_changed)
         self.image_list.verticalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
         self.image_list.horizontalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
@@ -467,12 +470,13 @@ class MainWindow(QMainWindow):
         navigation_layout.addWidget(smart_header)
         navigation_layout.addWidget(self.smart_collection_list)
 
-        self.tag_list = QListWidget()
+        self.tag_list = TagListWidget()
         self.tag_list.setObjectName("tagList")
         self.tag_list.setMaximumHeight(180)
         self.tag_list.itemClicked.connect(self.tag_activated)
         self.tag_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tag_list.customContextMenuRequested.connect(self.show_tag_context_menu)
+        self.tag_list.imagesDropped.connect(self.add_dropped_images_to_tag)
 
         tag_header = QFrame()
         tag_header.setObjectName("collectionHeader")
@@ -577,22 +581,64 @@ class MainWindow(QMainWindow):
 
         self.open_folder_action = QAction("Browse Folder…", self)
         self.open_folder_action.setShortcut("Ctrl+O")
+        self.open_folder_action.setStatusTip("Browse a folder without adding it to the managed library")
         self.open_folder_action.triggered.connect(self.choose_directory)
         toolbar.addAction(self.open_folder_action)
 
         self.add_folder_to_library_action = QAction("Add Folder to Library…", self)
+        self.add_folder_to_library_action.setShortcut("Ctrl+Alt+O")
+        self.add_folder_to_library_action.setStatusTip("Register and index a folder in the managed library")
         self.add_folder_to_library_action.triggered.connect(self.add_folder_to_library)
         toolbar.addAction(self.add_folder_to_library_action)
 
         self.refresh_action = QAction("Refresh", self)
         self.refresh_action.setShortcut("F5")
+        self.refresh_action.setStatusTip("Refresh the current view")
         self.refresh_action.triggered.connect(self.refresh_directory)
         toolbar.addAction(self.refresh_action)
 
+        self.focus_search_action = QAction("Focus Search", self)
+        self.focus_search_action.setShortcut("Ctrl+F")
+        self.focus_search_action.triggered.connect(self.focus_filename_search)
+        self.addAction(self.focus_search_action)
+
+        self.rename_current_action = QAction("Rename Current Item…", self)
+        self.rename_current_action.setShortcut("F2")
+        self.rename_current_action.triggered.connect(self.rename_current_sidebar_item)
+        self.addAction(self.rename_current_action)
+
         self.preview_action = QAction("Preview", self)
-        self.preview_action.setShortcut("Space")
+        self.preview_action.setShortcuts([QKeySequence("Space"), QKeySequence("Return")])
+        self.preview_action.setStatusTip("Preview the selected image")
         self.preview_action.triggered.connect(self.preview_selected_image)
         self.addAction(self.preview_action)
+
+        self.open_image_action = QAction("Open in System Viewer", self)
+        self.open_image_action.setShortcut("Ctrl+Return")
+        self.open_image_action.setStatusTip("Open the selected image in the operating system viewer")
+        self.open_image_action.triggered.connect(self.open_selected_image)
+        self.addAction(self.open_image_action)
+
+        self.compare_action = QAction("Compare Selected Images…", self)
+        self.compare_action.setShortcut("Ctrl+M")
+        self.compare_action.setStatusTip("Compare exactly two selected images")
+        self.compare_action.triggered.connect(self.compare_selected_images)
+        self.addAction(self.compare_action)
+
+        self.add_to_collection_action = QAction("Add Selection to Collection…", self)
+        self.add_to_collection_action.setShortcut("Ctrl+Alt+C")
+        self.add_to_collection_action.triggered.connect(self.add_selection_to_collection_dialog)
+        self.addAction(self.add_to_collection_action)
+
+        self.manage_tags_action = QAction("Manage Tags…", self)
+        self.manage_tags_action.setShortcut("Ctrl+T")
+        self.manage_tags_action.triggered.connect(self.manage_selected_tags)
+        self.addAction(self.manage_tags_action)
+
+        self.add_to_experiment_action = QAction("Add Selection to Experiment…", self)
+        self.add_to_experiment_action.setShortcut("Ctrl+Alt+E")
+        self.add_to_experiment_action.triggered.connect(self.add_selection_to_experiment)
+        self.addAction(self.add_to_experiment_action)
 
         self.prompt_library_action = QAction("Prompt Library", self)
         self.prompt_library_action.setShortcut("Ctrl+L")
@@ -631,14 +677,6 @@ class MainWindow(QMainWindow):
         file_menu.addAction(manage_library_action)
         file_menu.addAction(self.refresh_action)
         file_menu.addSeparator()
-        file_menu.addAction(self.prompt_library_action)
-        file_menu.addAction(self.experiment_notebook_action)
-        file_menu.addSeparator()
-        new_collection_action = QAction("New &Collection…", self)
-        new_collection_action.setShortcut("Ctrl+Shift+N")
-        new_collection_action.triggered.connect(self.create_collection)
-        file_menu.addAction(new_collection_action)
-        file_menu.addSeparator()
         exit_action = QAction("E&xit metaView", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.setStatusTip("Close metaView")
@@ -648,20 +686,20 @@ class MainWindow(QMainWindow):
         edit_menu = menu_bar.addMenu("&Edit")
         copy_path_action = QAction("Copy Image &Path", self)
         copy_path_action.setShortcut("Ctrl+Shift+C")
-        copy_path_action.setStatusTip("Copy the selected image path to the clipboard")
         copy_path_action.triggered.connect(self.copy_selected_image_path)
         edit_menu.addAction(copy_path_action)
-
         copy_prompt_action = QAction("Copy &Positive Prompt", self)
         copy_prompt_action.setShortcut("Ctrl+Shift+P")
         copy_prompt_action.triggered.connect(self.copy_selected_positive_prompt)
         edit_menu.addAction(copy_prompt_action)
-
         copy_negative_action = QAction("Copy &Negative Prompt", self)
-        copy_negative_action.setShortcut("Ctrl+Shift+N")
+        copy_negative_action.setShortcut("Ctrl+Alt+P")
         copy_negative_action.triggered.connect(self.copy_selected_negative_prompt)
         edit_menu.addAction(copy_negative_action)
-
+        copy_metadata_action = QAction("Copy Metadata as &JSON", self)
+        copy_metadata_action.setShortcut("Ctrl+Alt+J")
+        copy_metadata_action.triggered.connect(self.copy_selected_metadata_json)
+        edit_menu.addAction(copy_metadata_action)
         edit_menu.addSeparator()
         rating_menu = edit_menu.addMenu("Set &Rating")
         for rating in range(1, 6):
@@ -673,65 +711,48 @@ class MainWindow(QMainWindow):
         rating_menu.addAction(self.rating_actions[0])
 
         image_menu = menu_bar.addMenu("&Image")
-        manage_tags_action = QAction("Manage &Tags…", self)
-        manage_tags_action.setShortcut("Ctrl+Shift+T")
-        manage_tags_action.triggered.connect(self.manage_selected_tags)
-        image_menu.addAction(manage_tags_action)
-        image_menu.addSeparator()
         image_menu.addAction(self.preview_action)
-        open_image_action = QAction("Open in System &Viewer", self)
-        open_image_action.setShortcut("Ctrl+Return")
-        open_image_action.setStatusTip("Open the selected image in the operating system viewer")
-        open_image_action.triggered.connect(self.open_selected_image)
-        image_menu.addAction(open_image_action)
-
+        image_menu.addAction(self.open_image_action)
         reveal_action = QAction(self.file_manager_action_label(), self)
-        reveal_action.setStatusTip("Reveal the selected image in the file manager")
         reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
         image_menu.addAction(reveal_action)
-
         image_menu.addSeparator()
+        image_menu.addAction(self.compare_action)
+        compare_with_action = QAction("Compare &With…", self)
+        compare_with_action.setShortcut("Ctrl+Alt+M")
+        compare_with_action.triggered.connect(self.start_compare_with_selected)
+        image_menu.addAction(compare_with_action)
         similar_action = QAction("Find &Similar…", self)
         similar_action.setShortcut("Ctrl+Shift+F")
         similar_action.triggered.connect(self.find_similar_images)
         image_menu.addAction(similar_action)
-
+        image_menu.addSeparator()
+        image_menu.addAction(self.manage_tags_action)
+        image_menu.addAction(self.add_to_collection_action)
         image_menu.addSeparator()
         trash_action = QAction("Move to &Trash…", self)
         trash_action.setShortcut("Delete")
         trash_action.triggered.connect(self.move_selected_image_to_trash)
         image_menu.addAction(trash_action)
 
-        self.collection_menu = menu_bar.addMenu("&Collection")
+        self.collection_menu = menu_bar.addMenu("&Library")
         self.collection_menu.aboutToShow.connect(self.populate_collection_menu)
 
-        experiment_menu = menu_bar.addMenu("E&xperiment")
-        experiment_menu.addAction(self.experiment_notebook_action)
-        experiment_menu.addSeparator()
-
-        compare_action = QAction("&Compare Selected Images…", self)
-        compare_action.setShortcut("Ctrl+Shift+M")
-        compare_action.triggered.connect(self.compare_selected_images)
-        experiment_menu.addAction(compare_action)
-
+        research_menu = menu_bar.addMenu("&Research")
+        research_menu.addAction(self.experiment_notebook_action)
+        research_menu.addSeparator()
         experiment_view_action = QAction("Open Experiment &View", self)
         experiment_view_action.triggered.connect(self.open_experiment_view)
-        experiment_menu.addAction(experiment_view_action)
-
-        experiment_menu.addSeparator()
+        research_menu.addAction(experiment_view_action)
         create_action = QAction("Create &New Experiment…", self)
         create_action.setShortcut("Ctrl+Shift+E")
         create_action.triggered.connect(self.create_experiment_from_selection)
-        experiment_menu.addAction(create_action)
-
-        add_action = QAction("&Add Selection to Experiment…", self)
-        add_action.triggered.connect(self.add_selection_to_experiment)
-        experiment_menu.addAction(add_action)
+        research_menu.addAction(create_action)
+        research_menu.addAction(self.add_to_experiment_action)
 
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.refresh_action)
         view_menu.addSeparator()
-
         theme_menu = view_menu.addMenu("&Theme")
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
@@ -767,6 +788,11 @@ class MainWindow(QMainWindow):
         new_action.triggered.connect(self.create_collection)
         new_smart_action = self.collection_menu.addAction("New Smart Collection…")
         new_smart_action.triggered.connect(self.create_smart_collection)
+        manage_tags = self.collection_menu.addAction("Manage Tags…")
+        manage_tags.triggered.connect(self.manage_selected_tags)
+        manage_library = self.collection_menu.addAction("Manage Library Folders…")
+        manage_library.triggered.connect(self.manage_library_folders)
+        self.collection_menu.addSeparator()
 
         add_menu = self.collection_menu.addMenu("Add Selection to Collection")
         selected = bool(self.selected_image_paths())
@@ -1087,6 +1113,35 @@ class MainWindow(QMainWindow):
                 preserve_state=True,
                 image_paths=self.prompt_view_paths,
             )
+
+    def focus_filename_search(self) -> None:
+        self.filename_search_box.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.filename_search_box.selectAll()
+
+    def rename_current_sidebar_item(self) -> None:
+        if self.collection_list.hasFocus():
+            item = self.collection_list.currentItem()
+            if item is not None and isinstance(item.data(Qt.ItemDataRole.UserRole), int):
+                self.rename_collection(item.data(Qt.ItemDataRole.UserRole))
+                return
+        if self.smart_collection_list.hasFocus():
+            item = self.smart_collection_list.currentItem()
+            if item is not None and isinstance(item.data(Qt.ItemDataRole.UserRole), int):
+                self.edit_smart_collection(item.data(Qt.ItemDataRole.UserRole))
+                return
+        if self.tag_list.hasFocus():
+            item = self.tag_list.currentItem()
+            if item is not None and isinstance(item.data(Qt.ItemDataRole.UserRole), int):
+                self.rename_tag(item.data(Qt.ItemDataRole.UserRole))
+                return
+        if self.active_collection_id is not None:
+            self.rename_collection(self.active_collection_id)
+        elif self.active_smart_collection_id is not None:
+            self.edit_smart_collection(self.active_smart_collection_id)
+        elif self.active_tag_id is not None:
+            self.rename_tag(self.active_tag_id)
+        else:
+            self.statusBar().showMessage("Select a collection, Smart Collection, or tag to rename", 3000)
 
     def create_filter_row(
         self,
@@ -1827,32 +1882,41 @@ class MainWindow(QMainWindow):
         self.rating_label.setEnabled(enabled)
 
     def set_current_rating(self, rating: int) -> None:
-        path = self.selected_image_path()
-        if path is None:
+        paths = self.selected_image_paths()
+        if not paths:
             QMessageBox.information(
                 self,
                 "Select an image",
-                "Select a thumbnail before setting its rating.",
+                "Select one or more thumbnails before setting a rating.",
             )
             return
-        self.current_image_path = path
         value = max(0, min(5, int(rating)))
-        self.ratings_database.set(path, value)
+        for path in paths:
+            self.ratings_database.set(path, value)
+            item = self.thumbnail_items.get(str(path.resolve())) or self.thumbnail_items.get(str(path))
+            if item is not None:
+                item.setData(RATING_ROLE, value)
+                indexed = self.image_index.get(path)
+                if indexed is not None:
+                    self.apply_indexed_metadata(item, indexed)
+        current = self.selected_image_path()
+        if current is not None:
+            self.current_image_path = current
+        self.update_rating_controls(value, enabled=True)
+        count = len(paths)
+        description = (
+            f"rated {value} star" + ("" if value == 1 else "s")
+            if value
+            else "rating cleared"
+        )
+        self.statusBar().showMessage(
+            f"{count} image{'s' if count != 1 else ''}: {description}", 3000
+        )
         if self.active_smart_collection_id is not None:
             smart_id = self.active_smart_collection_id
             QTimer.singleShot(0, lambda: self.open_smart_collection(smart_id))
-        item = self.thumbnail_items.get(str(path))
-        if item is not None:
-            item.setData(RATING_ROLE, value)
-            base_tip = str(path)
-            item.setToolTip(f"{base_tip}\nRating: {rating_text(value)}" if value else base_tip)
-        self.update_rating_controls(value, enabled=True)
-        self.statusBar().showMessage(
-            f"{path.name}: " + (f"rated {value} star" + ("" if value == 1 else "s") if value else "rating cleared"),
-            3000,
-        )
-        if self.current_sort_mode().startswith("rating_") and self.current_directory is not None:
-            self.load_directory(self.current_directory, preserve_state=True)
+        elif self.current_sort_mode().startswith("rating_") and self.current_directory is not None:
+            self.load_directory(self.current_directory, preserve_state=True, image_paths=self.prompt_view_paths)
         else:
             self.apply_filters()
             self.schedule_visible_thumbnail_load()
@@ -2172,27 +2236,25 @@ class MainWindow(QMainWindow):
         selected = self.selected_image_paths()
         if not selected:
             return
-        menu = QMenu(self.image_list)
 
+        menu = QMenu(self.image_list)
         preview_action = menu.addAction("Preview")
         preview_action.setEnabled(len(selected) == 1)
         preview_action.triggered.connect(self.preview_selected_image)
 
-        open_action = menu.addAction("Open Image")
+        compare_action = menu.addAction("Compare Selected…")
+        compare_action.setEnabled(len(selected) == 2)
+        compare_action.triggered.connect(self.compare_selected_images)
+        compare_with_action = menu.addAction("Compare With…")
+        compare_with_action.setEnabled(len(selected) == 1)
+        compare_with_action.triggered.connect(self.start_compare_with_selected)
+
+        open_action = menu.addAction("Open in System Viewer")
         open_action.setEnabled(len(selected) == 1)
         open_action.triggered.connect(self.open_selected_image)
-
-        reveal_label = self.file_manager_action_label()
-        reveal_action = menu.addAction(reveal_label)
+        reveal_action = menu.addAction(self.file_manager_action_label())
         reveal_action.setEnabled(len(selected) == 1)
         reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
-
-        copy_path_action = menu.addAction("Copy Path")
-        copy_path_action.setEnabled(len(selected) == 1)
-        copy_path_action.triggered.connect(self.copy_selected_image_path)
-
-        manage_tags_action = menu.addAction("Manage Tags…")
-        manage_tags_action.triggered.connect(self.manage_selected_tags)
 
         menu.addSeparator()
         add_collection_menu = menu.addMenu("Add to Collection")
@@ -2207,19 +2269,47 @@ class MainWindow(QMainWindow):
         add_collection_menu.addSeparator()
         new_collection_action = add_collection_menu.addAction("New Collection…")
         new_collection_action.triggered.connect(self.create_collection_from_selection)
+
+        manage_tags_action = menu.addAction("Manage Tags…")
+        manage_tags_action.triggered.connect(self.manage_selected_tags)
+        add_experiment_action = menu.addAction("Add to Experiment…")
+        add_experiment_action.triggered.connect(self.add_selection_to_experiment)
+        create_experiment_action = menu.addAction("Create Experiment…")
+        create_experiment_action.triggered.connect(self.create_experiment_from_selection)
+
         if self.active_collection_id is not None:
             remove_collection_action = menu.addAction("Remove from Collection")
             remove_collection_action.triggered.connect(self.remove_selection_from_active_collection)
+
         menu.addSeparator()
-        compare_action = menu.addAction("Compare…")
-        compare_action.setEnabled(len(selected) == 2)
-        compare_action.triggered.connect(self.compare_selected_images)
+        rating_menu = menu.addMenu("Set Rating")
+        for rating in range(1, 6):
+            action = rating_menu.addAction(f"{rating} star" + ("" if rating == 1 else "s"))
+            action.triggered.connect(
+                lambda _checked=False, value=rating: self.set_current_rating(value)
+            )
+        rating_menu.addSeparator()
+        clear_rating = rating_menu.addAction("Clear rating")
+        clear_rating.triggered.connect(lambda: self.set_current_rating(0))
+
+        copy_menu = menu.addMenu("Copy")
+        copy_prompt = copy_menu.addAction("Positive Prompt")
+        copy_prompt.setEnabled(len(selected) == 1)
+        copy_prompt.triggered.connect(self.copy_selected_positive_prompt)
+        copy_negative = copy_menu.addAction("Negative Prompt")
+        copy_negative.setEnabled(len(selected) == 1)
+        copy_negative.triggered.connect(self.copy_selected_negative_prompt)
+        copy_metadata = copy_menu.addAction("Metadata as JSON")
+        copy_metadata.setEnabled(len(selected) == 1)
+        copy_metadata.triggered.connect(self.copy_selected_metadata_json)
+        copy_path = copy_menu.addAction("File Path")
+        copy_path.setEnabled(len(selected) == 1)
+        copy_path.triggered.connect(self.copy_selected_image_path)
+
         similar_action = menu.addAction("Find Similar…")
         similar_action.setEnabled(len(selected) == 1)
         similar_action.triggered.connect(self.find_similar_images)
-        menu.addSeparator()
-        create_action = menu.addAction("Create Experiment…")
-        create_action.triggered.connect(self.create_experiment_from_selection)
+
         menu.addSeparator()
         delete_action = menu.addAction("Move to Trash…")
         delete_action.setEnabled(len(selected) == 1)
@@ -2286,6 +2376,24 @@ class MainWindow(QMainWindow):
         if not paths:
             self.preview.clear()
             self.preview.setText("This collection is empty.\n\nDrag images onto it or use Add to Collection.")
+
+    def add_selection_to_collection_dialog(self) -> None:
+        paths = self.selected_image_paths()
+        if not paths:
+            QMessageBox.information(self, "Select images", "Select one or more images first.")
+            return
+        collections = self.collection_repository.list()
+        if not collections:
+            self.create_collection_from_selection()
+            return
+        names = [collection.name for collection in collections]
+        choice, accepted = QInputDialog.getItem(
+            self, "Add to Collection", "Collection:", names, 0, False
+        )
+        if not accepted:
+            return
+        collection = collections[names.index(choice)]
+        self.add_selection_to_collection(collection.id)
 
     def add_selection_to_collection(self, collection_id: int) -> None:
         paths = self.selected_image_paths()
@@ -2545,6 +2653,21 @@ class MainWindow(QMainWindow):
             self.open_smart_collection(self.active_smart_collection_id)
         self.statusBar().showMessage(f"Tags updated — {added} assignment(s) added, {removed} removed", 4000)
 
+    def add_dropped_images_to_tag(self, tag_id: int, paths: object) -> None:
+        image_paths = [path for path in paths if isinstance(path, Path)] if isinstance(paths, list) else []
+        if not image_paths:
+            return
+        added = self.tag_repository.assign(tag_id, image_paths)
+        self.refresh_tags()
+        self.refresh_selected_tag_tooltips(image_paths)
+        if self.active_tag_id == tag_id:
+            self.open_tag(tag_id)
+        if self.active_smart_collection_id is not None:
+            self.open_smart_collection(self.active_smart_collection_id)
+        self.statusBar().showMessage(
+            f"Assigned tag to {added} image{'s' if added != 1 else ''}", 3000
+        )
+
     def refresh_selected_tag_tooltips(self, paths: list[Path]) -> None:
         for path in paths:
             item = self.thumbnail_items.get(str(path.resolve())) or self.thumbnail_items.get(str(path))
@@ -2669,6 +2792,14 @@ class MainWindow(QMainWindow):
         )
         ExperimentSummaryDialog(self.experiment_service, notebook, aggregate.experiment.id, analysis, self).exec()
 
+    def copy_selected_metadata_json(self) -> None:
+        path = self.selected_image_path()
+        if path is None:
+            return
+        metadata = self.current_metadata if path == self.current_image_path else read_image_metadata(path)
+        QApplication.clipboard().setText(display_json(metadata))
+        self.statusBar().showMessage("Metadata JSON copied", 3000)
+
     def copy_selected_positive_prompt(self) -> None:
         path = self.selected_image_path()
         if path is None:
@@ -2757,9 +2888,14 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Keyboard Shortcuts",
-            "Ctrl+O  Open folder\nSpace  Preview selected image\n"
-            "Ctrl+Return  Open in system viewer\nCtrl+E  Experiment Notebook\n"
-            "Ctrl+L  Prompt Library\nF5  Refresh\nDelete  Move to Trash",
+            "Ctrl+O  Browse folder\nCtrl+Alt+O  Add folder to Library\n"
+            "Space / Enter  Preview selected image\nCtrl+Return  Open in system viewer\n"
+            "Ctrl+M  Compare two selected images\nCtrl+Alt+M  Compare With…\n"
+            "Ctrl+Alt+C  Add selection to Collection\nCtrl+T  Manage Tags\n"
+            "Ctrl+Alt+E  Add selection to Experiment\nCtrl+E  Experiment Notebook\n"
+            "Ctrl+L  Prompt Library\nCtrl+F  Focus filename search\n"
+            "Ctrl+1…5  Set rating; Ctrl+0 clears\nF2  Rename current Library item\n"
+            "F5  Refresh\nDelete  Move to Trash\nEsc  Cancel Compare With",
         )
 
     def show_about_dialog(self) -> None:
@@ -2801,6 +2937,34 @@ class MainWindow(QMainWindow):
         self.compare_button.setEnabled(
             len(self.image_list.selectedItems()) == 2
         )
+
+    def start_compare_with_selected(self) -> None:
+        path = self.selected_image_path()
+        if path is None:
+            QMessageBox.information(self, "Select an image", "Select one image to use as the comparison reference.")
+            return
+        self.compare_reference_path = path.resolve()
+        self.statusBar().showMessage(
+            f"Compare With: click another thumbnail to compare with {path.name} (Esc to cancel)",
+            8000,
+        )
+        self.image_list.setCursor(Qt.CursorShape.CrossCursor)
+
+    def thumbnail_clicked(self, item: QListWidgetItem) -> None:
+        if self.compare_reference_path is None:
+            return
+        value = item.data(PATH_ROLE)
+        if not isinstance(value, str):
+            return
+        candidate = Path(value).resolve()
+        reference = self.compare_reference_path
+        if candidate == reference:
+            self.statusBar().showMessage("Choose a different image to compare", 3000)
+            return
+        self.compare_reference_path = None
+        self.image_list.unsetCursor()
+        dialog = ComparisonDialog(reference, candidate, self)
+        dialog.exec()
 
     def compare_selected_images(self) -> None:
         selected = self.image_list.selectedItems()
@@ -3123,6 +3287,15 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self.update_preview()
         self.schedule_visible_thumbnail_load()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape and self.compare_reference_path is not None:
+            self.compare_reference_path = None
+            self.image_list.unsetCursor()
+            self.statusBar().showMessage("Compare With cancelled", 2000)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
         self.save_settings()

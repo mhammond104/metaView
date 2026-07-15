@@ -1,12 +1,20 @@
+
+### Workflow and UX polish
+
+- Added a richer thumbnail context menu covering Preview, Compare, Collections, Tags, ratings, copy actions, experiments, and file management.
+- Added a two-click **Compare With…** workflow with Escape to cancel.
+- Added direct drag-and-drop assignment from thumbnails onto user tags.
+- Added consistent shortcuts for Preview, Compare, Collections, Tags, Experiments, search, and Library-item rename.
+- Added bulk rating for multi-selected images.
+- Reorganised the menu bar around File, Edit, Image, Library, Research, View, and Help.
+- Expanded the keyboard-shortcut reference and status-bar guidance.
+
 # Changelog
 
 ## [Unreleased]
 
 ### Added
 
-- Explicit managed-library folders, an All Images view, and a Library sidebar.
-- Separate Browse Folder and Add Folder to Library workflows.
-- Library-folder management with add, remove, and rescan/open actions.
 - Smart Collections with saved AND-based rules for rating, model, sampler, scheduler, positive prompt, and filename.
 - Smart Collection creation, editing, deletion, browsing, refresh, and empty-result guidance.
 - Background metadata indexing with visible progress and persistent library-wide index status.
@@ -18,8 +26,6 @@
 
 ### Changed
 
-- Opening a folder now browses it temporarily; only explicitly registered folders are persisted in the authoritative image index.
-- Smart Collections now evaluate managed-library images only.
 - Expanded the image index to store model, sampler, scheduler, steps, resolution, and LoRA summaries.
 - Reused cached metadata for unchanged files instead of reparsing them whenever a folder is opened.
 - Smart Collections now evaluate indexed metadata and refresh automatically when background indexing completes.
