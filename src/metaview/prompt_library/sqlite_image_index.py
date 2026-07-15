@@ -15,7 +15,7 @@ from .image_index import (
 from .models import IndexedImage, Prompt
 from .normalization import normalize_prompt
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 3
 
 
 class SQLiteImageIndexRepository(ImageIndexRepository):
@@ -47,6 +47,13 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
                         directory TEXT NOT NULL,
                         positive_prompt TEXT NOT NULL DEFAULT '',
                         prompt_key TEXT NOT NULL DEFAULT '',
+                        model TEXT NOT NULL DEFAULT '',
+                        sampler TEXT NOT NULL DEFAULT '',
+                        scheduler TEXT NOT NULL DEFAULT '',
+                        steps TEXT NOT NULL DEFAULT '',
+                        resolution TEXT NOT NULL DEFAULT '',
+                        loras_json TEXT NOT NULL DEFAULT '[]',
+                        metadata_version INTEGER NOT NULL DEFAULT 1,
                         modified_ns INTEGER NOT NULL,
                         file_size INTEGER NOT NULL,
                         indexed_at TEXT NOT NULL
@@ -58,9 +65,38 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
                         ON indexed_images(directory);
                     """
                 )
-                self._connection.execute(
-                    f"PRAGMA user_version = {_SCHEMA_VERSION}"
-                )
+                self._connection.execute("PRAGMA user_version = 1")
+        if version < 2:
+            columns = {
+                str(row["name"])
+                for row in self._connection.execute("PRAGMA table_info(indexed_images)")
+            }
+            additions = {
+                "model": "TEXT NOT NULL DEFAULT ''",
+                "sampler": "TEXT NOT NULL DEFAULT ''",
+                "scheduler": "TEXT NOT NULL DEFAULT ''",
+                "steps": "TEXT NOT NULL DEFAULT ''",
+                "resolution": "TEXT NOT NULL DEFAULT ''",
+                "loras_json": "TEXT NOT NULL DEFAULT '[]'",
+            }
+            with self._connection:
+                for name, definition in additions.items():
+                    if name not in columns:
+                        self._connection.execute(
+                            f"ALTER TABLE indexed_images ADD COLUMN {name} {definition}"
+                        )
+                self._connection.execute("PRAGMA user_version = 2")
+        if version < 3:
+            columns = {
+                str(row["name"])
+                for row in self._connection.execute("PRAGMA table_info(indexed_images)")
+            }
+            with self._connection:
+                if "metadata_version" not in columns:
+                    self._connection.execute(
+                        "ALTER TABLE indexed_images ADD COLUMN metadata_version INTEGER NOT NULL DEFAULT 0"
+                    )
+                self._connection.execute("PRAGMA user_version = 3")
 
     def upsert(self, image: IndexedImage) -> IndexedImage:
         with self._connection:
@@ -68,12 +104,20 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
                 """
                 INSERT INTO indexed_images(
                     path, directory, positive_prompt, prompt_key,
+                    model, sampler, scheduler, steps, resolution, loras_json, metadata_version,
                     modified_ns, file_size, indexed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 ON CONFLICT(path) DO UPDATE SET
                     directory=excluded.directory,
                     positive_prompt=excluded.positive_prompt,
                     prompt_key=excluded.prompt_key,
+                    model=excluded.model,
+                    sampler=excluded.sampler,
+                    scheduler=excluded.scheduler,
+                    steps=excluded.steps,
+                    resolution=excluded.resolution,
+                    loras_json=excluded.loras_json,
+                    metadata_version=excluded.metadata_version,
                     modified_ns=excluded.modified_ns,
                     file_size=excluded.file_size,
                     indexed_at=excluded.indexed_at
@@ -83,6 +127,12 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
                     str(image.directory),
                     image.positive_prompt,
                     image.prompt_key,
+                    image.model,
+                    image.sampler,
+                    image.scheduler,
+                    image.steps,
+                    image.resolution,
+                    image.loras_json,
                     image.modified_ns,
                     image.file_size,
                     image.indexed_at.isoformat(),
@@ -149,6 +199,12 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
                 )
         return len(missing)
 
+    def all_images(self) -> list[IndexedImage]:
+        rows = self._connection.execute(
+            "SELECT * FROM indexed_images ORDER BY path COLLATE NOCASE"
+        ).fetchall()
+        return [self._row_to_image(row) for row in rows]
+
     def matching_images(self, prompt: Prompt | str) -> list[IndexedImage]:
         key = self._prompt_key(prompt)
         if not key:
@@ -206,13 +262,14 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
     ) -> bool:
         row = self._connection.execute(
             """
-            SELECT modified_ns, file_size
+            SELECT modified_ns, file_size, metadata_version
             FROM indexed_images WHERE path=?
             """,
             (str(path.resolve()),),
         ).fetchone()
         return (
             row is None
+            or int(row["metadata_version"]) < 1
             or int(row["modified_ns"]) != modified_ns
             or int(row["file_size"]) != file_size
         )
@@ -248,5 +305,11 @@ class SQLiteImageIndexRepository(ImageIndexRepository):
             positive_prompt=str(row["positive_prompt"]),
             modified_ns=int(row["modified_ns"]),
             file_size=int(row["file_size"]),
+            model=str(row["model"]),
+            sampler=str(row["sampler"]),
+            scheduler=str(row["scheduler"]),
+            steps=str(row["steps"]),
+            resolution=str(row["resolution"]),
+            loras_json=str(row["loras_json"]),
             indexed_at=datetime.fromisoformat(str(row["indexed_at"])),
         )

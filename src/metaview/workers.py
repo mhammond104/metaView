@@ -125,7 +125,8 @@ class ThumbnailWorker(QRunnable):
 
 
 class MetadataSignals(QObject):
-    loaded = Signal(str, str, str, str, str, object, int, int, int)
+    loaded = Signal(str, str, str, str, str, object, int, object, object)
+    failed = Signal(str, str, int)
 
 
 class MetadataWorker(QRunnable):
@@ -136,36 +137,39 @@ class MetadataWorker(QRunnable):
         self.signals = MetadataSignals()
 
     def run(self) -> None:
-        metadata = read_image_metadata(self.path)
-        summary = extract_summary(metadata)
-        model = summary["model"] or UNKNOWN_MODEL
-        sampler = summary["sampler"] or UNKNOWN_SAMPLER
-        scheduler = summary["scheduler"] or UNKNOWN_SCHEDULER
-        positive_prompt = summary["positive"]
-
-        image_size = QImageReader(str(self.path)).size()
-        resolution = ""
-        if image_size.isValid():
-            resolution = f"{image_size.width()} × {image_size.height()}"
-
-        tooltip_data = {
-            "model": model,
-            "sampler": sampler,
-            "steps": summary.get("steps", ""),
-            "scheduler": scheduler,
-            "resolution": resolution,
-            "loras": extract_loras(metadata),
-        }
         try:
-            stat = self.path.stat()
-            modified_ns = stat.st_mtime_ns
-            file_size = stat.st_size
-        except OSError:
-            modified_ns = 0
-            file_size = 0
-        self.signals.loaded.emit(
-            str(self.path), model, sampler, scheduler,
-            positive_prompt, tooltip_data, self.generation, modified_ns, file_size
-        )
+            metadata = read_image_metadata(self.path)
+            summary = extract_summary(metadata)
+            model = summary["model"] or UNKNOWN_MODEL
+            sampler = summary["sampler"] or UNKNOWN_SAMPLER
+            scheduler = summary["scheduler"] or UNKNOWN_SCHEDULER
+            positive_prompt = summary["positive"]
+
+            image_size = QImageReader(str(self.path)).size()
+            resolution = ""
+            if image_size.isValid():
+                resolution = f"{image_size.width()} × {image_size.height()}"
+
+            tooltip_data = {
+                "model": model,
+                "sampler": sampler,
+                "steps": summary.get("steps", ""),
+                "scheduler": scheduler,
+                "resolution": resolution,
+                "loras": extract_loras(metadata),
+            }
+            try:
+                stat = self.path.stat()
+                modified_ns = int(stat.st_mtime_ns)
+                file_size = int(stat.st_size)
+            except OSError:
+                modified_ns = 0
+                file_size = 0
+            self.signals.loaded.emit(
+                str(self.path), model, sampler, scheduler,
+                positive_prompt, tooltip_data, self.generation, modified_ns, file_size
+            )
+        except Exception as error:
+            self.signals.failed.emit(str(self.path), str(error), self.generation)
 
 
