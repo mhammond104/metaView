@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -440,4 +442,71 @@ class ExperimentWindow(QDialog):
 
 
 # Backward-compatible name used by the Phase 2 main-window integration.
+
+class ExperimentNotebookDialog(QDialog):
+    """Browse notebooks and open an existing experiment."""
+
+    def __init__(self, service: ExperimentService, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.service = service
+        self.selected_experiment_id: int | None = None
+        self.setWindowTitle("Experiment Notebook")
+        self.resize(760, 520)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Notebook / Experiment", "Status", "Updated"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.itemDoubleClicked.connect(lambda _item, _column: self._open_selected())
+
+        open_button = QPushButton("Open Experiment")
+        open_button.clicked.connect(self._open_selected)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.reject)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(open_button)
+        buttons.addWidget(close_button)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Select an experiment to open:"))
+        layout.addWidget(self.tree, 1)
+        layout.addLayout(buttons)
+        self._populate()
+
+    def _populate(self) -> None:
+        self.tree.clear()
+        for notebook in self.service.repository.list_notebooks(include_archived=True):
+            notebook_item = QTreeWidgetItem([
+                notebook.title,
+                notebook.status.value.title(),
+                notebook.updated_at.astimezone().strftime("%Y-%m-%d %H:%M"),
+            ])
+            notebook_item.setData(0, Qt.ItemDataRole.UserRole, None)
+            self.tree.addTopLevelItem(notebook_item)
+            if notebook.id is None:
+                continue
+            for experiment in self.service.repository.list_experiments(notebook.id):
+                child = QTreeWidgetItem([
+                    experiment.title,
+                    experiment.status.value.title(),
+                    experiment.updated_at.astimezone().strftime("%Y-%m-%d %H:%M"),
+                ])
+                child.setData(0, Qt.ItemDataRole.UserRole, experiment.id)
+                notebook_item.addChild(child)
+            notebook_item.setExpanded(True)
+        self.tree.resizeColumnToContents(0)
+
+    def _open_selected(self) -> None:
+        item = self.tree.currentItem()
+        if item is None:
+            return
+        value = item.data(0, Qt.ItemDataRole.UserRole)
+        if value is None:
+            item.setExpanded(not item.isExpanded())
+            return
+        self.selected_experiment_id = int(value)
+        self.accept()
+
+
 ExperimentSummaryDialog = ExperimentWindow

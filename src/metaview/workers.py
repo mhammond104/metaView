@@ -81,7 +81,7 @@ from PySide6.QtWidgets import (
 )
 
 from .constants import *
-from .metadata import extract_summary, read_image_metadata, thumbnail_cache_path
+from .metadata import extract_loras, extract_summary, read_image_metadata, thumbnail_cache_path
 
 class ThumbnailSignals(QObject):
     loaded = Signal(str, QImage, bool, int)
@@ -125,7 +125,7 @@ class ThumbnailWorker(QRunnable):
 
 
 class MetadataSignals(QObject):
-    loaded = Signal(str, str, str, str, str, int, int, int)
+    loaded = Signal(str, str, str, str, str, object, int, int, int)
 
 
 class MetadataWorker(QRunnable):
@@ -142,6 +142,20 @@ class MetadataWorker(QRunnable):
         sampler = summary["sampler"] or UNKNOWN_SAMPLER
         scheduler = summary["scheduler"] or UNKNOWN_SCHEDULER
         positive_prompt = summary["positive"]
+
+        image_size = QImageReader(str(self.path)).size()
+        resolution = ""
+        if image_size.isValid():
+            resolution = f"{image_size.width()} × {image_size.height()}"
+
+        tooltip_data = {
+            "model": model,
+            "sampler": sampler,
+            "steps": summary.get("steps", ""),
+            "scheduler": scheduler,
+            "resolution": resolution,
+            "loras": extract_loras(metadata),
+        }
         try:
             stat = self.path.stat()
             modified_ns = stat.st_mtime_ns
@@ -151,7 +165,7 @@ class MetadataWorker(QRunnable):
             file_size = 0
         self.signals.loaded.emit(
             str(self.path), model, sampler, scheduler,
-            positive_prompt, self.generation, modified_ns, file_size
+            positive_prompt, tooltip_data, self.generation, modified_ns, file_size
         )
 
 

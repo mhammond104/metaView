@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
 import sqlite3
 import sys
 from datetime import datetime
@@ -12,8 +14,10 @@ from typing import Any
 from PIL import Image, UnidentifiedImageError
 from PySide6.QtCore import (
     QDir,
+    QFile,
     QFileSystemWatcher,
     QPoint,
+    QProcess,
     QRectF,
     QMimeData,
     QObject,
@@ -29,6 +33,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QDesktopServices,
     QDrag,
     QColor,
@@ -59,6 +64,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QInputDialog,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -103,8 +109,14 @@ from .prompt_library import (
     import_legacy_prompt_library,
 )
 from .workers import MetadataWorker, ThumbnailWorker
+from .preview import PreviewWindow
+from .theme import THEMES, apply_theme, current_theme_key
 from .experiments import ExperimentService, SQLiteExperimentRepository, AnalysedImage, analyse_images
-from .experiments.ui import CreateExperimentDialog, ExperimentSummaryDialog
+from .experiments.ui import (
+    CreateExperimentDialog,
+    ExperimentNotebookDialog,
+    ExperimentSummaryDialog,
+)
 
 def legacy_prompt_library_database_path() -> Path:
     base = QStandardPaths.writableLocation(
@@ -191,6 +203,7 @@ class MainWindow(QMainWindow):
         self.prompt_view_title = ""
         self.ratings_database = ImageRatingsDatabase()
         self.active_rating_filter = "all"
+        self.preview_window: PreviewWindow | None = None
 
         self.file_watcher = QFileSystemWatcher(self)
         self.file_watcher.directoryChanged.connect(self.directory_contents_changed)
@@ -213,6 +226,7 @@ class MainWindow(QMainWindow):
         self.create_preview()
         self.create_layout()
         self.create_toolbar()
+        self.create_menus()
         self.restore_settings()
         self.statusBar().showMessage("Ready")
 
@@ -238,6 +252,7 @@ class MainWindow(QMainWindow):
         self.image_list.setWordWrap(True)
         self.image_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.image_list.currentItemChanged.connect(self.image_selected)
+        self.image_list.itemDoubleClicked.connect(self.preview_thumbnail_from_item)
         self.image_list.itemSelectionChanged.connect(self.thumbnail_selection_changed)
         self.image_list.verticalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
         self.image_list.horizontalScrollBar().valueChanged.connect(self.schedule_visible_thumbnail_load)
@@ -301,13 +316,15 @@ class MainWindow(QMainWindow):
         self.add_filter_button("scheduler", "All", checked=True)
 
         self.thumbnail_panel = QWidget()
+        self.thumbnail_panel.setObjectName("thumbnailPanel")
         panel_layout = QVBoxLayout(self.thumbnail_panel)
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(2)
         search_row = QWidget()
+        search_row.setObjectName("searchRow")
         search_layout = QHBoxLayout(search_row)
         search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.setSpacing(4)
+        search_layout.setSpacing(3)
         search_layout.addWidget(self.filename_search_box)
         search_layout.addWidget(self.prompt_search_box)
         search_layout.addWidget(QLabel("Sort:"))
@@ -316,10 +333,11 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(self.rating_filter_combo)
 
         self.prompt_view_bar = QFrame()
+        self.prompt_view_bar.setObjectName("promptViewBar")
         self.prompt_view_bar.setFrameShape(QFrame.Shape.StyledPanel)
         self.prompt_view_bar.setVisible(False)
         prompt_view_layout = QHBoxLayout(self.prompt_view_bar)
-        prompt_view_layout.setContentsMargins(8, 5, 8, 5)
+        prompt_view_layout.setContentsMargins(6, 3, 6, 3)
         self.prompt_view_label = QLabel()
         self.return_prompt_view_button = QPushButton("Return to previous view")
         self.return_prompt_view_button.clicked.connect(self.return_from_prompt_view)
@@ -334,9 +352,9 @@ class MainWindow(QMainWindow):
 
     def create_preview(self) -> None:
         self.preview = QLabel("Select a folder containing images")
+        self.preview.setObjectName("mainImagePreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumSize(400, 300)
-        self.preview.setStyleSheet("QLabel { background: palette(base); border: 1px solid palette(mid); }")
         self.metadata_panel = MetadataPanel(
             self.export_workflow_for_image,
             self.add_prompt_to_library,
@@ -371,6 +389,10 @@ class MainWindow(QMainWindow):
         self.create_experiment_button.setEnabled(False)
         self.create_experiment_button.clicked.connect(self.create_experiment_from_selection)
 
+        self.experiment_notebook_button = QPushButton("Experiment Notebook")
+        self.experiment_notebook_button.setObjectName("primaryAction")
+        self.experiment_notebook_button.clicked.connect(self.open_experiment_notebook)
+
         self.compare_button = QPushButton("Compare")
         self.compare_button.setEnabled(False)
         self.compare_button.clicked.connect(self.compare_selected_images)
@@ -396,8 +418,11 @@ class MainWindow(QMainWindow):
         self.clear_rating_button.setEnabled(False)
         self.clear_rating_button.clicked.connect(lambda: self.set_current_rating(0))
 
-        action_layout = QHBoxLayout()
-        action_layout.setContentsMargins(8, 4, 8, 8)
+        action_strip = QFrame()
+        action_strip.setObjectName("mainActionStrip")
+        action_layout = QHBoxLayout(action_strip)
+        action_layout.setContentsMargins(7, 4, 7, 4)
+        action_layout.setSpacing(3)
         action_layout.addStretch(1)
         action_layout.addWidget(self.rating_label)
         for button in self.rating_buttons:
@@ -407,6 +432,7 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.find_similar_button)
         action_layout.addWidget(self.experiment_view_button)
         action_layout.addWidget(self.create_experiment_button)
+        action_layout.addWidget(self.experiment_notebook_button)
         action_layout.addWidget(self.compare_button)
         action_layout.addWidget(self.open_image_button)
 
@@ -415,33 +441,193 @@ class MainWindow(QMainWindow):
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
         central_layout.addWidget(self.main_splitter, 1)
-        central_layout.addLayout(action_layout)
+        central_layout.addWidget(action_strip)
         self.setCentralWidget(central_widget)
 
     def create_toolbar(self) -> None:
         toolbar = QToolBar("Main")
+        toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
-        open_action = QAction("Open folder", self)
-        open_action.setShortcut("Ctrl+O")
-        open_action.triggered.connect(self.choose_directory)
-        toolbar.addAction(open_action)
-        refresh_action = QAction("Refresh", self)
-        refresh_action.setShortcut("F5")
-        refresh_action.triggered.connect(self.refresh_directory)
-        toolbar.addAction(refresh_action)
-        library_action = QAction("Prompt library", self)
-        library_action.setShortcut("Ctrl+L")
-        library_action.triggered.connect(self.open_prompt_library)
-        toolbar.addAction(library_action)
+
+        self.open_folder_action = QAction("Open Folder…", self)
+        self.open_folder_action.setShortcut("Ctrl+O")
+        self.open_folder_action.triggered.connect(self.choose_directory)
+        toolbar.addAction(self.open_folder_action)
+
+        self.refresh_action = QAction("Refresh", self)
+        self.refresh_action.setShortcut("F5")
+        self.refresh_action.triggered.connect(self.refresh_directory)
+        toolbar.addAction(self.refresh_action)
+
+        self.preview_action = QAction("Preview", self)
+        self.preview_action.setShortcut("Space")
+        self.preview_action.triggered.connect(self.preview_selected_image)
+        self.addAction(self.preview_action)
+
+        self.prompt_library_action = QAction("Prompt Library", self)
+        self.prompt_library_action.setShortcut("Ctrl+L")
+        self.prompt_library_action.triggered.connect(self.open_prompt_library)
+        toolbar.addAction(self.prompt_library_action)
+
+        self.experiment_notebook_action = QAction("Experiment Notebook", self)
+        self.experiment_notebook_action.setShortcut("Ctrl+E")
+        self.experiment_notebook_action.triggered.connect(self.open_experiment_notebook)
+        toolbar.addAction(self.experiment_notebook_action)
+
+        self.rating_actions: list[QAction] = []
         for rating in range(6):
             rating_action = QAction(f"Set rating {rating}", self)
             rating_action.setShortcut(f"Ctrl+{rating}")
-            rating_action.triggered.connect(lambda _checked=False, value=rating: self.set_current_rating(value))
+            rating_action.triggered.connect(
+                lambda _checked=False, value=rating: self.set_current_rating(value)
+            )
             self.addAction(rating_action)
+            self.rating_actions.append(rating_action)
+
         toolbar.addSeparator()
         self.folder_label = QLabel("No folder selected")
         toolbar.addWidget(self.folder_label)
+
+    def create_menus(self) -> None:
+        menu_bar = self.menuBar()
+        menu_bar.clear()
+        menu_bar.setNativeMenuBar(False)
+
+        file_menu = menu_bar.addMenu("&File")
+        file_menu.addAction(self.open_folder_action)
+        file_menu.addAction(self.refresh_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.prompt_library_action)
+        file_menu.addAction(self.experiment_notebook_action)
+        file_menu.addSeparator()
+        exit_action = QAction("E&xit metaView", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.setStatusTip("Close metaView")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        edit_menu = menu_bar.addMenu("&Edit")
+        copy_path_action = QAction("Copy Image &Path", self)
+        copy_path_action.setShortcut("Ctrl+Shift+C")
+        copy_path_action.setStatusTip("Copy the selected image path to the clipboard")
+        copy_path_action.triggered.connect(self.copy_selected_image_path)
+        edit_menu.addAction(copy_path_action)
+
+        copy_prompt_action = QAction("Copy &Positive Prompt", self)
+        copy_prompt_action.setShortcut("Ctrl+Shift+P")
+        copy_prompt_action.triggered.connect(self.copy_selected_positive_prompt)
+        edit_menu.addAction(copy_prompt_action)
+
+        copy_negative_action = QAction("Copy &Negative Prompt", self)
+        copy_negative_action.setShortcut("Ctrl+Shift+N")
+        copy_negative_action.triggered.connect(self.copy_selected_negative_prompt)
+        edit_menu.addAction(copy_negative_action)
+
+        edit_menu.addSeparator()
+        rating_menu = edit_menu.addMenu("Set &Rating")
+        for rating in range(1, 6):
+            action = self.rating_actions[rating]
+            action.setText(f"{rating} star" + ("" if rating == 1 else "s"))
+            rating_menu.addAction(action)
+        self.rating_actions[0].setText("Clear rating")
+        rating_menu.addSeparator()
+        rating_menu.addAction(self.rating_actions[0])
+
+        image_menu = menu_bar.addMenu("&Image")
+        image_menu.addAction(self.preview_action)
+        open_image_action = QAction("Open in System &Viewer", self)
+        open_image_action.setShortcut("Ctrl+Return")
+        open_image_action.setStatusTip("Open the selected image in the operating system viewer")
+        open_image_action.triggered.connect(self.open_selected_image)
+        image_menu.addAction(open_image_action)
+
+        reveal_action = QAction(self.file_manager_action_label(), self)
+        reveal_action.setStatusTip("Reveal the selected image in the file manager")
+        reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
+        image_menu.addAction(reveal_action)
+
+        image_menu.addSeparator()
+        similar_action = QAction("Find &Similar…", self)
+        similar_action.setShortcut("Ctrl+Shift+F")
+        similar_action.triggered.connect(self.find_similar_images)
+        image_menu.addAction(similar_action)
+
+        image_menu.addSeparator()
+        trash_action = QAction("Move to &Trash…", self)
+        trash_action.setShortcut("Delete")
+        trash_action.triggered.connect(self.move_selected_image_to_trash)
+        image_menu.addAction(trash_action)
+
+        experiment_menu = menu_bar.addMenu("E&xperiment")
+        experiment_menu.addAction(self.experiment_notebook_action)
+        experiment_menu.addSeparator()
+
+        compare_action = QAction("&Compare Selected Images…", self)
+        compare_action.setShortcut("Ctrl+Shift+M")
+        compare_action.triggered.connect(self.compare_selected_images)
+        experiment_menu.addAction(compare_action)
+
+        experiment_view_action = QAction("Open Experiment &View", self)
+        experiment_view_action.triggered.connect(self.open_experiment_view)
+        experiment_menu.addAction(experiment_view_action)
+
+        experiment_menu.addSeparator()
+        create_action = QAction("Create &New Experiment…", self)
+        create_action.setShortcut("Ctrl+Shift+E")
+        create_action.triggered.connect(self.create_experiment_from_selection)
+        experiment_menu.addAction(create_action)
+
+        add_action = QAction("&Add Selection to Experiment…", self)
+        add_action.triggered.connect(self.add_selection_to_experiment)
+        experiment_menu.addAction(add_action)
+
+        view_menu = menu_bar.addMenu("&View")
+        view_menu.addAction(self.refresh_action)
+        view_menu.addSeparator()
+
+        theme_menu = view_menu.addMenu("&Theme")
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.setExclusive(True)
+        current = current_theme_key()
+        light_separator_added = False
+        for key, theme in THEMES.items():
+            if theme.light and not light_separator_added:
+                theme_menu.addSeparator()
+                light_separator_added = True
+            action = QAction(theme.name, self, checkable=True)
+            action.setData(key)
+            action.setChecked(key == current)
+            action.triggered.connect(
+                lambda _checked=False, theme_key=key: self.set_application_theme(theme_key)
+            )
+            self.theme_action_group.addAction(action)
+            theme_menu.addAction(action)
+
+        help_menu = menu_bar.addMenu("&Help")
+        shortcuts_action = QAction("&Keyboard Shortcuts", self)
+        shortcuts_action.setShortcut("F1")
+        shortcuts_action.triggered.connect(self.show_keyboard_shortcuts)
+        help_menu.addAction(shortcuts_action)
+        help_menu.addSeparator()
+        about_action = QAction("&About metaView", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
+    @staticmethod
+    def file_manager_action_label() -> str:
+        return {
+            "win32": "Reveal in Explorer",
+            "darwin": "Reveal in Finder",
+        }.get(sys.platform, "Reveal in File Manager")
+
+    def set_application_theme(self, key: str) -> None:
+        if key not in THEMES:
+            return
+        self.settings.setValue("appearance/theme", key)
+        self.settings.sync()
+        apply_theme(QApplication.instance(), key)
+        self.statusBar().showMessage(f"Theme: {THEMES[key].name}", 3000)
 
     def restore_settings(self) -> None:
         geometry = self.settings.value("window/geometry")
@@ -622,8 +808,8 @@ class MainWindow(QMainWindow):
 
         contents = QWidget()
         layout = QHBoxLayout(contents)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(3, 1, 3, 1)
+        layout.setSpacing(3)
         layout.addStretch(1)
 
         scroll = QScrollArea()
@@ -648,7 +834,7 @@ class MainWindow(QMainWindow):
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(2, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
         label = QLabel(f"{title}:")
         label.setMinimumWidth(68)
@@ -900,6 +1086,7 @@ class MainWindow(QMainWindow):
         sampler: str,
         scheduler: str,
         positive_prompt: str,
+        tooltip_data: object,
         generation: int,
         modified_ns: int,
         file_size: int,
@@ -921,12 +1108,57 @@ class MainWindow(QMainWindow):
         item.setData(SAMPLER_ROLE, sampler)
         item.setData(SCHEDULER_ROLE, scheduler)
         item.setData(POSITIVE_PROMPT_ROLE, positive_prompt)
+        item.setToolTip(self.thumbnail_metadata_tooltip(path_string, tooltip_data))
 
         self.add_filter_button("model", model)
         self.add_filter_button("sampler", sampler)
         self.add_filter_button("scheduler", scheduler)
 
         self.apply_filters()
+
+    @staticmethod
+    def thumbnail_metadata_tooltip(path_string: str, tooltip_data: object) -> str:
+        """Format metadata shown when hovering over a thumbnail."""
+        if not isinstance(tooltip_data, dict):
+            return path_string
+
+        lines: list[str] = []
+        model = str(tooltip_data.get("model", "") or "").strip()
+        sampler = str(tooltip_data.get("sampler", "") or "").strip()
+        steps = str(tooltip_data.get("steps", "") or "").strip()
+        scheduler = str(tooltip_data.get("scheduler", "") or "").strip()
+        resolution = str(tooltip_data.get("resolution", "") or "").strip()
+
+        if model:
+            lines.append(f"Model: {model_display_name(model)}")
+        if sampler:
+            sampler_text = sampler + (f" ({steps} steps)" if steps else "")
+            lines.append(f"Sampler: {sampler_text}")
+        if scheduler:
+            lines.append(f"Scheduler: {scheduler}")
+        if resolution:
+            lines.append(f"Resolution: {resolution}")
+
+        raw_loras = tooltip_data.get("loras", [])
+        loras = raw_loras if isinstance(raw_loras, list) else []
+        if loras:
+            lines.extend(["", "LoRAs:"])
+            maximum_loras = 8
+            for lora in loras[:maximum_loras]:
+                if not isinstance(lora, dict):
+                    continue
+                name = Path(str(lora.get("name", "") or "")).name
+                model_strength = str(lora.get("model_strength", "") or "").strip()
+                clip_strength = str(lora.get("clip_strength", "") or "").strip()
+                strength = model_strength
+                if clip_strength and clip_strength != model_strength:
+                    strength = f"model {model_strength or '—'}, CLIP {clip_strength}"
+                lines.append(f"  {name}: {strength}" if strength else f"  {name}")
+            remaining = len(loras) - maximum_loras
+            if remaining > 0:
+                lines.append(f"  …and {remaining} more")
+
+        return "\n".join(lines) if lines else path_string
 
     def search_changed(self, _text: str) -> None:
         self.apply_filters()
@@ -1509,6 +1741,25 @@ class MainWindow(QMainWindow):
         if not selected:
             return
         menu = QMenu(self.image_list)
+
+        preview_action = menu.addAction("Preview")
+        preview_action.setEnabled(len(selected) == 1)
+        preview_action.triggered.connect(self.preview_selected_image)
+
+        open_action = menu.addAction("Open Image")
+        open_action.setEnabled(len(selected) == 1)
+        open_action.triggered.connect(self.open_selected_image)
+
+        reveal_label = self.file_manager_action_label()
+        reveal_action = menu.addAction(reveal_label)
+        reveal_action.setEnabled(len(selected) == 1)
+        reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
+
+        copy_path_action = menu.addAction("Copy Path")
+        copy_path_action.setEnabled(len(selected) == 1)
+        copy_path_action.triggered.connect(self.copy_selected_image_path)
+
+        menu.addSeparator()
         compare_action = menu.addAction("Compare…")
         compare_action.setEnabled(len(selected) == 2)
         compare_action.triggered.connect(self.compare_selected_images)
@@ -1518,6 +1769,10 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         create_action = menu.addAction("Create Experiment…")
         create_action.triggered.connect(self.create_experiment_from_selection)
+        menu.addSeparator()
+        delete_action = menu.addAction("Move to Trash…")
+        delete_action.setEnabled(len(selected) == 1)
+        delete_action.triggered.connect(self.move_selected_image_to_trash)
         menu.exec(self.image_list.viewport().mapToGlobal(position))
 
     def create_experiment_from_selection(self) -> None:
@@ -1557,6 +1812,106 @@ class MainWindow(QMainWindow):
             5000,
         )
         ExperimentSummaryDialog(self.experiment_service, notebook, aggregate.experiment.id, analysis, self).exec()
+
+    def copy_selected_positive_prompt(self) -> None:
+        path = self.selected_image_path()
+        if path is None:
+            return
+        metadata = self.current_metadata if path == self.current_image_path else read_image_metadata(path)
+        prompt = extract_summary(metadata).get("positive", "")
+        QApplication.clipboard().setText(str(prompt))
+        self.statusBar().showMessage("Positive prompt copied", 3000)
+
+    def copy_selected_negative_prompt(self) -> None:
+        path = self.selected_image_path()
+        if path is None:
+            return
+        metadata = self.current_metadata if path == self.current_image_path else read_image_metadata(path)
+        prompt = extract_summary(metadata).get("negative", "")
+        QApplication.clipboard().setText(str(prompt))
+        self.statusBar().showMessage("Negative prompt copied", 3000)
+
+    def open_experiment_notebook(self) -> None:
+        dialog = ExperimentNotebookDialog(self.experiment_service, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.selected_experiment_id is None:
+            return
+        self.open_existing_experiment(dialog.selected_experiment_id)
+
+    def open_existing_experiment(self, experiment_id: int) -> None:
+        try:
+            aggregate = self.experiment_service.load_experiment(experiment_id)
+            notebook = self.experiment_service.repository.get_notebook(
+                aggregate.experiment.notebook_id
+            )
+            if notebook is None:
+                raise RuntimeError("The experiment notebook is no longer available")
+            analysed: list[AnalysedImage] = []
+            for run in aggregate.runs:
+                if run.id is None:
+                    continue
+                for run_image in aggregate.images_by_run.get(run.id, ()):
+                    path = run_image.image_path
+                    if path.is_file():
+                        metadata = read_image_metadata(path)
+                        analysed.append(AnalysedImage(path, metadata, extract_summary(metadata)))
+            analysis = analyse_images(analysed)
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not open experiment", str(exc))
+            return
+        ExperimentSummaryDialog(
+            self.experiment_service, notebook, experiment_id, analysis, self
+        ).exec()
+
+    def add_selection_to_experiment(self) -> None:
+        paths = self.selected_image_paths()
+        if not paths:
+            QMessageBox.information(self, "Select images", "Select one or more thumbnails first.")
+            return
+        choices: list[str] = []
+        ids: list[int] = []
+        for notebook in self.experiment_service.repository.list_notebooks():
+            if notebook.id is None:
+                continue
+            for experiment in self.experiment_service.repository.list_experiments(notebook.id):
+                if experiment.id is not None:
+                    choices.append(f"{notebook.title} — {experiment.title}")
+                    ids.append(experiment.id)
+        if not choices:
+            QMessageBox.information(self, "No experiments", "Create an experiment before adding images.")
+            return
+        choice, accepted = QInputDialog.getItem(
+            self, "Add to Experiment", "Experiment:", choices, 0, False
+        )
+        if not accepted:
+            return
+        experiment_id = ids[choices.index(choice)]
+        try:
+            for path in paths:
+                run = self.experiment_service.create_run(experiment_id)
+                if run.id is not None:
+                    self.experiment_service.add_images(run.id, [path])
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not add images", str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Added {len(paths)} image{'s' if len(paths) != 1 else ''} to experiment", 4000
+        )
+
+    def show_keyboard_shortcuts(self) -> None:
+        QMessageBox.information(
+            self,
+            "Keyboard Shortcuts",
+            "Ctrl+O  Open folder\nSpace  Preview selected image\n"
+            "Ctrl+Return  Open in system viewer\nCtrl+E  Experiment Notebook\n"
+            "Ctrl+L  Prompt Library\nF5  Refresh\nDelete  Move to Trash",
+        )
+
+    def show_about_dialog(self) -> None:
+        QMessageBox.about(
+            self,
+            "About metaView",
+            "metaView 0.3.0\n\nGenAI image management, metadata analysis and experimentation.",
+        )
 
     def thumbnail_selection_changed(self) -> None:
         """Refresh selection-dependent actions for any thumbnail selection change."""
@@ -1612,7 +1967,85 @@ class MainWindow(QMainWindow):
         dialog = ComparisonDialog(paths[0], paths[1], self)
         dialog.exec()
 
+    def visible_image_paths(self) -> list[Path]:
+        """Return image paths in the thumbnail list's current visible order."""
+        paths: list[Path] = []
+        for row in range(self.image_list.count()):
+            item = self.image_list.item(row)
+            if item.isHidden():
+                continue
+            path_value = item.data(PATH_ROLE)
+            if isinstance(path_value, str):
+                paths.append(Path(path_value))
+        return paths
+
+    def preview_image(self, path: Path) -> None:
+        """Open the reusable metaView preview window for an image."""
+        if not path.is_file():
+            QMessageBox.warning(
+                self,
+                "Image not found",
+                f"The image no longer exists:\n\n{path}",
+            )
+            return
+
+        paths = self.visible_image_paths()
+        if path not in paths:
+            paths = [path]
+
+        if self.preview_window is not None:
+            self.preview_window.close()
+
+        window = PreviewWindow(paths, path, self)
+        self.preview_window = window
+        window.destroyed.connect(
+            lambda _object=None, preview=window: self._clear_preview_window(preview)
+        )
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _clear_preview_window(self, window: PreviewWindow) -> None:
+        if self.preview_window is window:
+            self.preview_window = None
+
+    def preview_selected_image(self) -> None:
+        """Preview the currently selected thumbnail inside metaView."""
+        path = self.selected_image_path()
+        if path is None:
+            QMessageBox.information(
+                self,
+                "Select an image",
+                "Select a thumbnail before opening Preview.",
+            )
+            return
+        self.preview_image(path)
+
+    def open_image(self, path: Path) -> None:
+        """Open an image using the operating system's default application."""
+        if not path.is_file():
+            QMessageBox.warning(
+                self,
+                "Image not found",
+                f"The image no longer exists:\n\n{path}",
+            )
+            return
+
+        self.current_image_path = path
+        opened = QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(path.resolve()))
+        )
+        if not opened:
+            QMessageBox.warning(
+                self,
+                "Unable to open image",
+                "The operating system could not open the selected image.\n\n"
+                "Make sure a default application is configured for this "
+                "image type.",
+            )
+
     def open_selected_image(self) -> None:
+        """Open the currently selected thumbnail in the OS image viewer."""
         path = self.selected_image_path()
         if path is None:
             QMessageBox.information(
@@ -1621,16 +2054,152 @@ class MainWindow(QMainWindow):
                 "Select a thumbnail before opening an image.",
             )
             return
-        self.current_image_path = path
-        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        if not opened:
+        self.open_image(path)
+
+    def preview_thumbnail_from_item(self, item: QListWidgetItem) -> None:
+        """Preview the image represented by a double-clicked thumbnail."""
+        path_value = item.data(PATH_ROLE)
+        if isinstance(path_value, str):
+            self.preview_image(Path(path_value))
+
+    def show_selected_image_in_file_manager(self) -> None:
+        """Reveal the selected image in the platform file manager."""
+        path = self.selected_image_path()
+        if path is None:
+            return
+        if not path.exists():
             QMessageBox.warning(
                 self,
-                "Unable to open image",
-                "The operating system could not open the selected image. "
-                "On Arch Linux, install an image viewer and set it as the "
-                "default application for this image type.",
+                "Image not found",
+                f"The image no longer exists:\n\n{path}",
             )
+            return
+
+        if sys.platform == "win32":
+            opened = QProcess.startDetached(
+                "explorer.exe", ["/select,", str(path.resolve())]
+            )
+        elif sys.platform == "darwin":
+            opened = QProcess.startDetached(
+                "open", ["-R", str(path.resolve())]
+            )
+        else:
+            opened = self._open_linux_file_manager(path.resolve())
+
+        opened_ok = opened[0] if isinstance(opened, tuple) else bool(opened)
+        if not opened_ok:
+            QMessageBox.warning(
+                self,
+                "Unable to open file manager",
+                f"The containing folder could not be opened:\n\n{path.parent}",
+            )
+
+
+    @staticmethod
+    def _open_linux_file_manager(path: Path) -> bool:
+        """Open a real Linux file manager, preferring the active desktop."""
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").casefold()
+        session = os.environ.get("DESKTOP_SESSION", "").casefold()
+        desktop_hint = f"{desktop} {session}"
+
+        candidates: list[tuple[str, list[str]]] = []
+
+        def add(command: str, arguments: list[str]) -> None:
+            if command not in {name for name, _args in candidates}:
+                candidates.append((command, arguments))
+
+        if "kde" in desktop_hint or "plasma" in desktop_hint:
+            add("dolphin", ["--select", str(path)])
+        if "gnome" in desktop_hint or "ubuntu" in desktop_hint:
+            add("nautilus", ["--select", str(path)])
+        if "xfce" in desktop_hint:
+            add("thunar", [str(path.parent)])
+        if "cinnamon" in desktop_hint:
+            add("nemo", [str(path.parent)])
+        if "mate" in desktop_hint:
+            add("caja", [str(path.parent)])
+        if "lxqt" in desktop_hint:
+            add("pcmanfm-qt", [str(path.parent)])
+        if "lxde" in desktop_hint:
+            add("pcmanfm", [str(path.parent)])
+
+        for command, arguments in (
+            ("dolphin", ["--select", str(path)]),
+            ("nautilus", ["--select", str(path)]),
+            ("nemo", [str(path.parent)]),
+            ("thunar", [str(path.parent)]),
+            ("caja", [str(path.parent)]),
+            ("pcmanfm-qt", [str(path.parent)]),
+            ("pcmanfm", [str(path.parent)]),
+        ):
+            add(command, arguments)
+
+        for command, arguments in candidates:
+            if shutil.which(command):
+                result = QProcess.startDetached(command, arguments)
+                return result[0] if isinstance(result, tuple) else bool(result)
+
+        # Last resort: use the freedesktop portal/handler only when no known
+        # graphical file manager is available.
+        if shutil.which("xdg-open"):
+            result = QProcess.startDetached("xdg-open", [str(path.parent)])
+            return result[0] if isinstance(result, tuple) else bool(result)
+
+        return False
+
+    def copy_selected_image_path(self) -> None:
+        """Copy the selected image's absolute path to the clipboard."""
+        path = self.selected_image_path()
+        if path is None:
+            return
+        QApplication.clipboard().setText(str(path.resolve()))
+        self.statusBar().showMessage("Image path copied to clipboard", 3000)
+
+    def move_selected_image_to_trash(self) -> None:
+        """Move the selected image to the operating system's trash."""
+        path = self.selected_image_path()
+        if path is None:
+            return
+        if not path.is_file():
+            QMessageBox.warning(
+                self,
+                "Image not found",
+                f"The image no longer exists:\n\n{path}",
+            )
+            self.refresh_directory()
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Move image to Trash?",
+            f'Move "{path.name}" to the Trash or Recycle Bin?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        result = QFile.moveToTrash(str(path))
+        moved = result[0] if isinstance(result, tuple) else bool(result)
+        if not moved:
+            QMessageBox.warning(
+                self,
+                "Unable to move image",
+                f"The image could not be moved to Trash:\n\n{path}",
+            )
+            return
+
+        self.current_image_path = None
+        self.current_pixmap = None
+        self.current_metadata = {}
+        self.preview.clear()
+        self.preview.setText("Select an image")
+        self.metadata_panel.clear()
+        self.open_image_button.setEnabled(False)
+        self.find_similar_button.setEnabled(False)
+        self.experiment_view_button.setEnabled(False)
+        self.statusBar().showMessage(f'Moved "{path.name}" to Trash', 4000)
+        self.refresh_directory()
 
     def export_workflow_for_image(
         self,

@@ -324,8 +324,8 @@ class MetadataPanel(QWidget):
 
         parameters_contents = QWidget()
         parameters_layout_outer = QVBoxLayout(parameters_contents)
-        parameters_layout_outer.setContentsMargins(8, 8, 4, 8)
-        parameters_layout_outer.setSpacing(8)
+        parameters_layout_outer.setContentsMargins(6, 6, 3, 6)
+        parameters_layout_outer.setSpacing(6)
 
         parameters_frame = QFrame()
         parameters_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -351,7 +351,7 @@ class MetadataPanel(QWidget):
         workflow_frame = QFrame()
         workflow_frame.setFrameShape(QFrame.Shape.StyledPanel)
         workflow_layout = QHBoxLayout(workflow_frame)
-        workflow_layout.setContentsMargins(8, 6, 8, 6)
+        workflow_layout.setContentsMargins(6, 4, 6, 4)
         workflow_label = QLabel("Workflow JSON")
         workflow_label.setStyleSheet("font-weight: 600;")
         self.workflow_drag_icon = WorkflowDragIcon(workflow_exporter)
@@ -373,8 +373,8 @@ class MetadataPanel(QWidget):
 
         prompts_contents = QWidget()
         prompts_layout = QVBoxLayout(prompts_contents)
-        prompts_layout.setContentsMargins(4, 8, 8, 8)
-        prompts_layout.setSpacing(8)
+        prompts_layout.setContentsMargins(3, 6, 6, 6)
+        prompts_layout.setSpacing(6)
         prompts_layout.addWidget(self.positive_prompt, 1)
         self.add_to_library_button = QPushButton("Add to Library")
         self.add_to_library_button.setEnabled(False)

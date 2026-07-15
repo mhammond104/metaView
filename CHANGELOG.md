@@ -1,4 +1,20 @@
+
+### Usability pass
+
+- Double-click thumbnails to open integrated Preview.
+- Added full File/Edit/Image/Experiment/View/Help menu bar.
+- Added direct Experiment Notebook access and existing-experiment browser.
+- Fixed Preview toolbar anchoring and top-edge reveal.
+- Enabled smooth Preview scaling while zooming.
 # Changelog
+
+## 0.3.0 - Unreleased
+
+- Added Experiment Notebook foundations and UI integration.
+- Added integrated zoomable, pannable Preview with fullscreen navigation and overlay toolbar.
+- Added application-wide selectable themes: Catppuccin Macchiato, Gruvbox Dark, Tokyo Night, Dracula, Catppuccin Latte, and Gruvbox Light.
+- Restored thumbnail double-click opening and added richer context-menu actions.
+- Added cached thumbnail metadata tooltips.
 
 
 ## Unreleased

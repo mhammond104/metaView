@@ -83,8 +83,9 @@ def test_rating_and_open_actions_resolve_current_thumbnail_at_click_time() -> No
     assert "def selected_image_path(self) -> Path | None:" in source
     assert "path = self.selected_image_path()" in source
     assert "self.ratings_database.set(path, value)" in source
-    assert "QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))" in source
-
+    assert "def open_image(self, path: Path) -> None:" in source
+    assert "QUrl.fromLocalFile(str(path.resolve()))" in source
+    assert "self.open_image(path)" in source
 
 def test_metadata_panel_imports_all_metadata_helpers_it_uses() -> None:
     source = (
