@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
 import sqlite3
 import sys
 from datetime import datetime
@@ -108,7 +110,7 @@ from .prompt_library import (
 )
 from .workers import MetadataWorker, ThumbnailWorker
 from .preview import PreviewWindow
-from .theme import THEMES, apply_theme
+from .theme import THEMES, apply_theme, current_theme_key
 from .experiments import ExperimentService, SQLiteExperimentRepository, AnalysedImage, analyse_images
 from .experiments.ui import (
     CreateExperimentDialog,
@@ -587,8 +589,12 @@ class MainWindow(QMainWindow):
         theme_menu = view_menu.addMenu("&Theme")
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
-        current = str(self.settings.value("appearance/theme", "catppuccin_mocha"))
+        current = current_theme_key()
+        light_separator_added = False
         for key, theme in THEMES.items():
+            if theme.light and not light_separator_added:
+                theme_menu.addSeparator()
+                light_separator_added = True
             action = QAction(theme.name, self, checkable=True)
             action.setData(key)
             action.setChecked(key == current)
@@ -611,9 +617,9 @@ class MainWindow(QMainWindow):
     @staticmethod
     def file_manager_action_label() -> str:
         return {
-            "win32": "Show in Explorer",
-            "darwin": "Show in Finder",
-        }.get(sys.platform, "Show in File Manager")
+            "win32": "Reveal in Explorer",
+            "darwin": "Reveal in Finder",
+        }.get(sys.platform, "Reveal in File Manager")
 
     def set_application_theme(self, key: str) -> None:
         if key not in THEMES:
@@ -1744,10 +1750,7 @@ class MainWindow(QMainWindow):
         open_action.setEnabled(len(selected) == 1)
         open_action.triggered.connect(self.open_selected_image)
 
-        reveal_label = {
-            "win32": "Show in Explorer",
-            "darwin": "Show in Finder",
-        }.get(sys.platform, "Show in File Manager")
+        reveal_label = self.file_manager_action_label()
         reveal_action = menu.addAction(reveal_label)
         reveal_action.setEnabled(len(selected) == 1)
         reveal_action.triggered.connect(self.show_selected_image_in_file_manager)
@@ -2081,9 +2084,7 @@ class MainWindow(QMainWindow):
                 "open", ["-R", str(path.resolve())]
             )
         else:
-            opened = QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(path.resolve().parent))
-            )
+            opened = self._open_linux_file_manager(path.resolve())
 
         opened_ok = opened[0] if isinstance(opened, tuple) else bool(opened)
         if not opened_ok:
@@ -2092,6 +2093,59 @@ class MainWindow(QMainWindow):
                 "Unable to open file manager",
                 f"The containing folder could not be opened:\n\n{path.parent}",
             )
+
+
+    @staticmethod
+    def _open_linux_file_manager(path: Path) -> bool:
+        """Open a real Linux file manager, preferring the active desktop."""
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").casefold()
+        session = os.environ.get("DESKTOP_SESSION", "").casefold()
+        desktop_hint = f"{desktop} {session}"
+
+        candidates: list[tuple[str, list[str]]] = []
+
+        def add(command: str, arguments: list[str]) -> None:
+            if command not in {name for name, _args in candidates}:
+                candidates.append((command, arguments))
+
+        if "kde" in desktop_hint or "plasma" in desktop_hint:
+            add("dolphin", ["--select", str(path)])
+        if "gnome" in desktop_hint or "ubuntu" in desktop_hint:
+            add("nautilus", ["--select", str(path)])
+        if "xfce" in desktop_hint:
+            add("thunar", [str(path.parent)])
+        if "cinnamon" in desktop_hint:
+            add("nemo", [str(path.parent)])
+        if "mate" in desktop_hint:
+            add("caja", [str(path.parent)])
+        if "lxqt" in desktop_hint:
+            add("pcmanfm-qt", [str(path.parent)])
+        if "lxde" in desktop_hint:
+            add("pcmanfm", [str(path.parent)])
+
+        for command, arguments in (
+            ("dolphin", ["--select", str(path)]),
+            ("nautilus", ["--select", str(path)]),
+            ("nemo", [str(path.parent)]),
+            ("thunar", [str(path.parent)]),
+            ("caja", [str(path.parent)]),
+            ("pcmanfm-qt", [str(path.parent)]),
+            ("pcmanfm", [str(path.parent)]),
+        ):
+            add(command, arguments)
+
+        for command, arguments in candidates:
+            if shutil.which(command):
+                result = QProcess.startDetached(command, arguments)
+                return result[0] if isinstance(result, tuple) else bool(result)
+
+        # Last resort: use the freedesktop portal/handler only when no known
+        # graphical file manager is available.
+        if shutil.which("xdg-open"):
+            result = QProcess.startDetached("xdg-open", [str(path.parent)])
+            return result[0] if isinstance(result, tuple) else bool(result)
+
+        return False
 
     def copy_selected_image_path(self) -> None:
         """Copy the selected image's absolute path to the clipboard."""

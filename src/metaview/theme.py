@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPalette, QPainter, QPixmap, QFont
 from PySide6.QtWidgets import QApplication
 
 from .constants import asset_path
+from .ui_metrics import METRICS
 
 
 @dataclass(frozen=True)
@@ -28,18 +29,32 @@ class Theme:
 
 
 THEMES = {
-    "catppuccin_mocha": Theme("catppuccin_mocha", "Catppuccin Mocha", "#1e1e2e", "#11111b", "#181825", "#313244", "#45475a", "#cdd6f4", "#a6adc8", "#585b70", "#89b4fa", "#11111b", "#f38ba8"),
-    "gruvbox_dark": Theme("gruvbox_dark", "Gruvbox Dark", "#282828", "#1d2021", "#32302f", "#3c3836", "#504945", "#ebdbb2", "#a89984", "#665c54", "#d79921", "#282828", "#fb4934"),
+    "catppuccin_macchiato": Theme(
+        "catppuccin_macchiato", "Catppuccin Macchiato",
+        "#24273a", "#181926", "#1e2030", "#363a4f", "#494d64",
+        "#cad3f5", "#a5adcb", "#5b6078", "#8aadf4", "#181926", "#ed8796",
+    ),
+    "nord": Theme(
+        "nord", "Nord",
+        "#2e3440", "#242933", "#3b4252", "#434c5e", "#4c566a",
+        "#eceff4", "#d8dee9", "#596579", "#88c0d0", "#2e3440", "#bf616a",
+    ),
     "tokyo_night": Theme("tokyo_night", "Tokyo Night", "#1a1b26", "#16161e", "#24283b", "#292e42", "#3b4261", "#c0caf5", "#9aa5ce", "#414868", "#7aa2f7", "#16161e", "#f7768e"),
+    "gruvbox_dark": Theme("gruvbox_dark", "Gruvbox Dark", "#282828", "#1d2021", "#32302f", "#3c3836", "#504945", "#ebdbb2", "#a89984", "#665c54", "#d79921", "#282828", "#fb4934"),
     "dracula": Theme("dracula", "Dracula", "#282a36", "#21222c", "#343746", "#44475a", "#56596c", "#f8f8f2", "#bfbfbf", "#6272a4", "#bd93f9", "#282a36", "#ff5555"),
     "catppuccin_latte": Theme("catppuccin_latte", "Catppuccin Latte", "#eff1f5", "#e6e9ef", "#dce0e8", "#ccd0da", "#bcc0cc", "#4c4f69", "#6c6f85", "#9ca0b0", "#1e66f5", "#eff1f5", "#d20f39", True),
     "gruvbox_light": Theme("gruvbox_light", "Gruvbox Light", "#fbf1c7", "#f2e5bc", "#ebdbb2", "#d5c4a1", "#bdae93", "#3c3836", "#665c54", "#a89984", "#b57614", "#fbf1c7", "#cc241d", True),
 }
-DEFAULT_THEME = "catppuccin_mocha"
+DEFAULT_THEME = "catppuccin_macchiato"
 
 
 def current_theme_key() -> str:
-    value = str(QSettings("Martin Hammond", "ComfyUI Image Browser").value("appearance/theme", DEFAULT_THEME))
+    settings = QSettings("Martin Hammond", "ComfyUI Image Browser")
+    value = str(settings.value("appearance/theme", DEFAULT_THEME))
+    # v0.3.0 migration: Macchiato replaces the former Mocha option.
+    if value == "catppuccin_mocha":
+        value = DEFAULT_THEME
+        settings.setValue("appearance/theme", value)
     return value if value in THEMES else DEFAULT_THEME
 
 
@@ -90,7 +105,7 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     QMenuBar::item {{
         background: transparent;
         border-radius: 5px;
-        padding: 4px 8px;
+        padding: {METRICS.menu_padding_v}px 8px;
     }}
     QMenuBar::item:selected, QMenuBar::item:pressed {{
         background: {theme.surface};
@@ -99,12 +114,12 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     QMenu {{
         background: {theme.alternate};
         border: 1px solid {theme.border};
-        border-radius: 7px;
+        border-radius: {METRICS.radius_large}px;
         padding: 4px;
     }}
     QMenu::item {{
-        border-radius: 5px;
-        padding: 5px 25px 5px 24px;
+        border-radius: {METRICS.radius}px;
+        padding: {METRICS.menu_padding_v}px 25px {METRICS.menu_padding_v}px 24px;
         margin: 1px 0;
     }}
     QMenu::item:selected {{
@@ -124,7 +139,7 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         border: 0;
         border-bottom: 1px solid {theme.border};
         spacing: 3px;
-        padding: 4px 6px;
+        padding: {METRICS.toolbar_padding_v}px {METRICS.toolbar_padding_h}px;
     }}
     QToolBar#mainToolbar QToolButton {{
         background: transparent;
@@ -156,8 +171,8 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         selection-color: {theme.accent_text};
     }}
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
-        padding: 4px 7px;
-        min-height: 20px;
+        padding: {METRICS.control_padding_v}px {METRICS.control_padding_h}px;
+        min-height: 19px;
     }}
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
     QTreeView:focus, QListWidget:focus, QTableWidget:focus, QComboBox:focus {{
@@ -239,7 +254,7 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         color: {theme.muted};
         border: 0;
         border-bottom: 2px solid transparent;
-        padding: 6px 10px;
+        padding: {METRICS.tab_padding_v}px {METRICS.tab_padding_h}px;
         margin-right: 1px;
     }}
     QTabBar::tab:hover {{ color: {theme.text}; background: {theme.surface}; }}
@@ -260,8 +275,8 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
     }}
     QTableWidget {{ gridline-color: {theme.border}; }}
 
-    QScrollBar:vertical {{ background: transparent; width: 9px; margin: 1px; }}
-    QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 1px; }}
+    QScrollBar:vertical {{ background: transparent; width: {METRICS.scrollbar_extent}px; margin: 1px; }}
+    QScrollBar:horizontal {{ background: transparent; height: {METRICS.scrollbar_extent}px; margin: 1px; }}
     QScrollBar::handle {{
         background: {theme.border};
         min-height: 24px;
@@ -294,14 +309,14 @@ def apply_theme(app: QApplication, key: str | None = None) -> Theme:
         color: {theme.text};
         border: 1px solid {theme.border};
         border-radius: 4px;
-        padding: 4px 6px;
+        padding: {METRICS.toolbar_padding_v}px {METRICS.toolbar_padding_h}px;
     }}
     QLabel {{ background: transparent; }}
 
     QFrame#previewToolbarOverlay {{
         background-color: {theme.alternate};
         border: 1px solid {theme.border};
-        border-radius: 8px;
+        border-radius: {METRICS.radius_large}px;
     }}
     QFrame#previewToolbarOverlay QToolButton {{
         background: transparent;

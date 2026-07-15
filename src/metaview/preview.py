@@ -15,6 +15,8 @@ from PySide6.QtGui import (
     QResizeEvent,
     QWheelEvent,
 )
+from .ui_metrics import METRICS
+
 from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsScene,
@@ -267,7 +269,7 @@ class PreviewWindow(QMainWindow):
         self.toolbar_overlay = QFrame(self)
         self.toolbar_overlay.setObjectName("previewToolbarOverlay")
         layout = QHBoxLayout(self.toolbar_overlay)
-        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(1)
 
         for action in (
@@ -311,7 +313,7 @@ class PreviewWindow(QMainWindow):
         viewport_rect = self.view.viewport().rect()
         top_left = self.view.viewport().mapTo(self, viewport_rect.topLeft())
         x = max(8, top_left.x() + (viewport_rect.width() - self.toolbar_overlay.width()) // 2)
-        self.toolbar_overlay.move(x, top_left.y() + 12)
+        self.toolbar_overlay.move(x, top_left.y() + METRICS.preview_toolbar_margin_top)
         self.toolbar_overlay.raise_()
 
     def toggle_toolbar(self) -> None:
